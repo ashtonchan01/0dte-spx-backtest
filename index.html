@@ -132,7 +132,7 @@ input, select, button, textarea { font-family: 'IBM Plex Mono', monospace; outli
       <input type="number" id="bt-capital" value="10000" step="1000" style="font-size:14px;font-weight:700">
     </div>
   </div>
-  <div class="bt-grid-5" style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px">
+  <div class="bt-grid-6" style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:14px">
     <div class="form-group">
       <label>PROFIT TARGET</label>
       <select id="bt-profitTgt" style="font-size:12px">
@@ -156,6 +156,26 @@ input, select, button, textarea { font-family: 'IBM Plex Mono', monospace; outli
       <label>STOP PROXIMITY %</label>
       <input type="number" id="bt-proximity" value="25" step="5" min="0" max="100" style="font-size:14px;font-weight:700">
       <div style="font-size:9px;color:var(--textDim);margin-top:2px">% of buffer remaining<br><span style="color:var(--gold)">25% = stop triggers when SPX is 75% of the way to strike</span></div>
+    </div>
+    <div class="form-group">
+      <label>ENTRY TIME (ET)</label>
+      <select id="bt-entryTime" style="font-size:12px">
+        <option value="6.5">9:30 AM (open)</option>
+        <option value="6.25">9:45 AM (+15 min)</option>
+        <option value="6.0" selected>10:00 AM (+30 min)</option>
+        <option value="5.75">10:15 AM (+45 min)</option>
+        <option value="5.5">10:30 AM (+1 hr)</option>
+        <option value="5.25">10:45 AM (+1h 15)</option>
+        <option value="5.0">11:00 AM (+1h 30)</option>
+        <option value="4.75">11:15 AM (+1h 45)</option>
+        <option value="4.5">11:30 AM (+2 hr)</option>
+        <option value="4.25">11:45 AM (+2h 15)</option>
+        <option value="4.0">12:00 PM (+2h 30)</option>
+        <option value="3.75">12:15 PM (+2h 45)</option>
+        <option value="3.5">12:30 PM (+3 hr)</option>
+        <option value="3.25">12:45 PM (+3h 15)</option>
+        <option value="3.0">1:00 PM (+3h 30)</option>
+      </select>
     </div>
     <div style="display:flex;align-items:flex-end">
       <button class="btn" style="width:100%;padding:12px;font-size:14px;font-weight:700;color:var(--green);border-color:var(--green);cursor:pointer;letter-spacing:2px" onclick="runBacktest()">RUN BACKTEST</button>
@@ -225,6 +245,7 @@ function runBacktest() {
   const contractMode = document.getElementById('bt-contracts').value;
   const minCredit = parseFloat(document.getElementById('bt-minCredit').value);
   const proximity = parseFloat(document.getElementById('bt-proximity').value) / 100;
+  const hoursToExpiry = parseFloat(document.getElementById('bt-entryTime').value);
   const SLIPPAGE = 0.05;
 
   document.getElementById('bt-dataRange').textContent = `${HIST_DATA[0][0]} to ${HIST_DATA[HIST_DATA.length-1][0]} · ${HIST_DATA.length} trading days`;
@@ -280,7 +301,7 @@ function runBacktest() {
     if (dow === 0 || dow === 6) continue;
 
     const iv = vix / 100;
-    const T = (3.5/24)/365;
+    const T = (hoursToExpiry / 24) / 365;
     const r = 0.045;
 
     // ── Determine strategy ──
@@ -368,7 +389,7 @@ function runBacktest() {
 
     // ── Breach detection with proximity model ──
     const dailyRange = high - low;
-    const arvoFraction = 0.54;
+    const arvoFraction = hoursToExpiry / 6.5; // scales with entry time: earlier = more of daily range ahead
     const arvoRange = dailyRange * arvoFraction;
     const arvoLow = Math.min(close, open) - arvoRange * 0.3;
     const arvoHigh = Math.max(close, open) + arvoRange * 0.3;
