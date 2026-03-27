@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>0DTE SPX Backtest</title>
+
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="SPX Backtest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#121212">
+
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Chakra+Petch:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0e14; --panel: #0d1117; --panelAlt: #161b22; --panelBright: #1c2028;
+  --border: #21262d; --borderBright: #30363d;
+  --gold: #F0B429; --goldDim: #5a420a;
+  --green: #00D084; --greenDim: #003d26;
+  --red: #FF4757; --redDim: #5a0e1a;
+  --blue: #3B9EFF; --blueDim: #0c2544;
+  --cyan: #00E5FF; --cyanDim: #003d4d;
+  --orange: #FF6B35;
+  --purple: #A855F7;
+  --text: #c9cfd8; --textDim: #555d6c; --textMid: #818997; --white: #e6eaee;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: var(--bg); color: var(--text); font-family: 'Inter', -apple-system, sans-serif; font-size: 13px; min-height: 100vh; overflow-x: hidden; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+input, select, button, textarea { font-family: 'IBM Plex Mono', monospace; outline: none; }
+.container { max-width: 1600px; margin: 0 auto; padding: 12px 32px; }
+.glow { position: fixed; top: 0; left: 50%; transform: translateX(-50%); width: 900px; height: 250px; background: radial-gradient(ellipse, #ffffff03 0%, transparent 70%); pointer-events: none; z-index: 0; }
+.panel { background: var(--panel); border: 1px solid var(--border); }
+.panelAlt { background: var(--panelAlt); }
+.chakra { font-family: 'Chakra Petch', sans-serif; }
+.mono { font-family: 'IBM Plex Mono', monospace; }
+.label { font-size: 10px; color: var(--textDim); letter-spacing: 2px; }
+.btn { padding: 7px 14px; border: 1px solid; cursor: pointer; font-size: 10px; letter-spacing: 1px; background: transparent; transition: all 0.15s; }
+.btn:hover { filter: brightness(1.2); }
+.form-group { margin-bottom: 12px; }
+.form-group label { display: block; font-size: 10px; color: var(--textDim); letter-spacing: 2px; margin-bottom: 4px; }
+.form-group input, .form-group select, .form-group textarea {
+  width: 100%; background: var(--panelAlt); border: 1px solid var(--borderBright);
+  color: var(--white); padding: 8px 12px; font-size: 13px;
+}
+
+@supports (padding-top: env(safe-area-inset-top)) {
+  body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+}
+
+@media (max-width: 768px) {
+  .container { padding: 8px 12px; }
+  canvas { max-height: 200px; }
+  .btn { padding: 10px 16px; font-size: 12px; min-height: 44px; }
+  select { min-height: 44px; }
+  input[type="number"], input[type="text"] { min-height: 44px; font-size: 16px !important; }
+  .bt-grid-6 { grid-template-columns: 1fr 1fr !important; }
+  .bt-grid-5 { grid-template-columns: 1fr 1fr !important; }
+}
+
+@media (max-width: 480px) {
+  .container { padding: 6px 8px; }
+  .bt-grid-6 { grid-template-columns: 1fr !important; }
+  .bt-grid-5 { grid-template-columns: 1fr !important; }
+}
+</style>
+</head>
+<body>
+<div class="glow"></div>
+<div class="container" style="position:relative;z-index:1">
+
+<!-- MASTHEAD -->
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;padding-bottom:14px;border-bottom:2px solid var(--border)">
+  <div>
+    <div class="label" style="letter-spacing:5px;margin-bottom:2px;font-size:10px">SYSTEMATIC OPTIONS INCOME · 0DTE SPX</div>
+    <div class="chakra" style="font-size:26px;font-weight:700;color:var(--white);letter-spacing:2px">SPX BACKTEST</div>
+  </div>
+  <a href="https://ashtonchan01.github.io/spx-scanner" style="font-size:11px;color:var(--cyan);text-decoration:none;letter-spacing:1px;border:1px solid var(--cyan);padding:8px 16px;opacity:0.8">← SPX SCANNER</a>
+</div>
+
+<!-- BACKTEST PANEL -->
+<div class="panel" style="padding:16px;margin-bottom:12px">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+    <div class="chakra" style="font-size:20px;font-weight:700;color:var(--white)">STRATEGY BACKTEST</div>
+    <div style="font-size:11px;color:var(--textDim)" id="bt-dataRange"></div>
+  </div>
+  <div class="bt-grid-6" style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:14px">
+    <div class="form-group">
+      <label>STOP LOSS MODE</label>
+      <select id="bt-stopMode" style="font-size:12px" onchange="updateStopDesc()">
+        <option value="premium">Premium Multiple</option>
+        <option value="timegated" selected>Time-Gated (2hr delay)</option>
+        <option value="points">SPX Points</option>
+        <option value="time">Time-Based %</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>STOP VALUE</label>
+      <input type="number" id="bt-stopVal" value="2" step="0.5" min="1" style="font-size:14px;font-weight:700" disabled>
+      <div style="font-size:9px;color:var(--textDim);margin-top:2px" id="bt-stopDesc">Two-tier stop system<br><span style="color:var(--gold)">2× wide first 2hrs (noise protection)</span><br><span style="color:var(--red)">1.5× tight after 2hrs (theta decayed)</span><br><span style="color:var(--textDim)">3× emergency always active</span></div>
+    </div>
+    <div class="form-group">
+      <label>DELTA</label>
+      <select id="bt-delta" style="font-size:12px">
+        <option value="0.10">0.10 (Safe)</option>
+        <option value="0.12">0.12 (Morn)</option>
+        <option value="0.15" selected>0.15 (Arvo)</option>
+        <option value="0.18">0.18 (Med)</option>
+        <option value="0.20">0.20 (Aggr)</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>SPREAD WIDTH</label>
+      <select id="bt-width" style="font-size:12px">
+        <option value="10">10 pts</option>
+        <option value="15" selected>15 pts</option>
+        <option value="20">20 pts</option>
+        <option value="25">25 pts</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>STRATEGY</label>
+      <select id="bt-strategy" style="font-size:12px">
+        <option value="put" selected>Put Spread</option>
+        <option value="call">Call Spread</option>
+        <option value="ic">Iron Condor</option>
+        <option value="auto">Auto (200 SMA + VIX/GEX)</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>STARTING CAPITAL</label>
+      <input type="number" id="bt-capital" value="10000" step="1000" style="font-size:14px;font-weight:700">
+    </div>
+  </div>
+  <div class="bt-grid-5" style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px">
+    <div class="form-group">
+      <label>PROFIT TARGET</label>
+      <select id="bt-profitTgt" style="font-size:12px">
+        <option value="0.5">50% credit</option>
+        <option value="0.75">75% credit</option>
+        <option value="1.0" selected>100% (hold to expiry)</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>CONTRACTS</label>
+      <select id="bt-contracts" style="font-size:12px">
+        <option value="fixed">Fixed (from capital)</option>
+        <option value="phase" selected>Phase-based scaling</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>MIN CREDIT</label>
+      <input type="number" id="bt-minCredit" value="0.60" step="0.05" min="0.50" style="font-size:14px;font-weight:700">
+    </div>
+    <div class="form-group">
+      <label>STOP PROXIMITY %</label>
+      <input type="number" id="bt-proximity" value="25" step="5" min="0" max="100" style="font-size:14px;font-weight:700">
+      <div style="font-size:9px;color:var(--textDim);margin-top:2px">% of buffer remaining<br><span style="color:var(--gold)">25% = stop triggers when SPX is 75% of the way to strike</span></div>
+    </div>
+    <div style="display:flex;align-items:flex-end">
+      <button class="btn" style="width:100%;padding:12px;font-size:14px;font-weight:700;color:var(--green);border-color:var(--green);cursor:pointer;letter-spacing:2px" onclick="runBacktest()">RUN BACKTEST</button>
+    </div>
+  </div>
+</div>
+
+<!-- RESULTS -->
+<div id="bt-results"></div>
+
+</div><!-- /container -->
+
+<script src="hist_data.js"></script>
+<script>
+// ── BSM MATH ──
+function normCDF(x) {
+  const t = 1 / (1 + 0.2316419 * Math.abs(x));
+  const d = 0.3989422820 * Math.exp(-0.5 * x * x);
+  const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.7814779 + t * (-1.8212560 + t * 1.3302744))));
+  return x > 0 ? 1 - p : p;
+}
+function normPDF(x) { return Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI); }
+function bsm(S, K, T, rf, sigma, type) {
+  if (T <= 0.00001) return { price: Math.max(0, type === 'put' ? K - S : S - K), delta: 0, prob_otm: type === 'call' ? (S < K ? 1 : 0) : (S > K ? 1 : 0), theta: 0 };
+  const d1 = (Math.log(S / K) + (rf + 0.5 * sigma * sigma) * T) / (sigma * Math.sqrt(T));
+  const d2 = d1 - sigma * Math.sqrt(T);
+  const price = type === 'put'
+    ? K * Math.exp(-rf * T) * normCDF(-d2) - S * normCDF(-d1)
+    : S * normCDF(d1) - K * Math.exp(-rf * T) * normCDF(d2);
+  const delta = type === 'put' ? normCDF(d1) - 1 : normCDF(d1);
+  const prob_otm = type === 'put' ? normCDF(d2) : normCDF(-d2);
+  return { price, delta, prob_otm };
+}
+function findStrike(S, iv, T, targetDelta, type) {
+  let lo = S * 0.5, hi = S * 1.5;
+  for (let i = 0; i < 80; i++) {
+    const mid = (lo + hi) / 2;
+    const d = Math.abs(bsm(S, mid, T, 0.045, iv, type).delta);
+    if (d > targetDelta) { type === 'put' ? (hi = mid) : (lo = mid); }
+    else { type === 'put' ? (lo = mid) : (hi = mid); }
+  }
+  return Math.round(((lo + hi) / 2) / 5) * 5;
+}
+
+function updateStopDesc() {
+  const mode = document.getElementById('bt-stopMode').value;
+  const desc = document.getElementById('bt-stopDesc');
+  const valInput = document.getElementById('bt-stopVal');
+  valInput.disabled = false;
+  if (mode === 'premium') { desc.innerHTML = '× credit received<br><span style="color:var(--gold)">e.g. 2× = close if spread hits 2× your credit ($1.00 → stop at $2.00)</span>'; valInput.value = '2'; valInput.step = '0.5'; }
+  else if (mode === 'timegated') { desc.innerHTML = 'Two-tier stop system<br><span style="color:var(--gold)">2× wide first 2hrs (noise protection)</span><br><span style="color:var(--red)">1.5× tight after 2hrs (theta decayed)</span><br><span style="color:var(--textDim)">3× emergency always active</span>'; valInput.value = '2'; valInput.step = '0.5'; valInput.disabled = true; }
+  else if (mode === 'points') { desc.innerHTML = 'SPX points past short strike<br><span style="color:var(--gold)">e.g. 10 = close if SPX moves 10pts through your short strike</span>'; valInput.value = '10'; valInput.step = '5'; }
+  else { desc.innerHTML = '× credit (time-weighted avg)<br><span style="color:var(--gold)">Simulates tighter stops later in session (avg 2.5× across day)</span>'; valInput.value = '2.5'; valInput.step = '0.5'; }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// BACKTEST ENGINE
+// ══════════════════════════════════════════════════════════════════════════════
+function runBacktest() {
+  const stopMode = document.getElementById('bt-stopMode').value;
+  const stopVal = parseFloat(document.getElementById('bt-stopVal').value);
+  const delta = parseFloat(document.getElementById('bt-delta').value);
+  const width = parseInt(document.getElementById('bt-width').value);
+  const strategy = document.getElementById('bt-strategy').value;
+  const startCap = parseFloat(document.getElementById('bt-capital').value);
+  const profitPct = parseFloat(document.getElementById('bt-profitTgt').value);
+  const contractMode = document.getElementById('bt-contracts').value;
+  const minCredit = parseFloat(document.getElementById('bt-minCredit').value);
+  const proximity = parseFloat(document.getElementById('bt-proximity').value) / 100;
+  const SLIPPAGE = 0.05;
+
+  document.getElementById('bt-dataRange').textContent = `${HIST_DATA[0][0]} to ${HIST_DATA[HIST_DATA.length-1][0]} · ${HIST_DATA.length} trading days`;
+
+  // ── Pre-calculate rolling indicators ──
+  const closes = HIST_DATA.map(d => d[4]);
+
+  // 200 SMA
+  const sma200 = [];
+  for (let i = 0; i < closes.length; i++) {
+    if (i < 199) { sma200.push(null); continue; }
+    let sum = 0;
+    for (let j = i - 199; j <= i; j++) sum += closes[j];
+    sma200.push(sum / 200);
+  }
+
+  // VIX regime classification for market mechanics (GEX proxy)
+  const vixArr = HIST_DATA.map(d => d[5]);
+  const gexProxy = [];
+  for (let i = 0; i < vixArr.length; i++) {
+    if (i < 5) { gexProxy.push('neutral'); continue; }
+    const vixChg = vixArr[i] - vixArr[i-5];
+    const vixLevel = vixArr[i];
+    if (vixLevel < 18 && vixChg <= 0) gexProxy.push('positive');
+    else if (vixLevel > 25 && vixChg > 2) gexProxy.push('negative');
+    else if (vixLevel > 22 && vixChg > 0) gexProxy.push('cautious');
+    else gexProxy.push('neutral');
+  }
+
+  function getPhaseForCap(cap) {
+    if (cap >= 300000) return { perK: 12000 };
+    if (cap >= 75000) return { perK: 8000 };
+    if (cap >= 25000) return { perK: 6000 };
+    return { perK: 0 };
+  }
+
+  const trades = [];
+  let capital = startCap;
+  let equity = [{ date: HIST_DATA[0][0], value: capital }];
+  let maxEquity = capital;
+  let maxDrawdown = 0;
+  let monthlyPnL = {};
+  let dayOfWeekStats = { Mon:{ w:0,l:0 }, Tue:{ w:0,l:0 }, Wed:{ w:0,l:0 }, Thu:{ w:0,l:0 }, Fri:{ w:0,l:0 } };
+  let vixBuckets = { 'VIX<15':{ w:0,l:0 }, '15-20':{ w:0,l:0 }, '20-25':{ w:0,l:0 }, '25-30':{ w:0,l:0 }, 'VIX>30':{ w:0,l:0 } };
+  let biasStats = { 'BULL→Put':{ w:0,l:0 }, 'BEAR→Call':{ w:0,l:0 }, 'NEUT→IC':{ w:0,l:0 }, 'CAUTION→Skip':{ w:0,l:0,skipped:0 }, 'No200SMA':{ w:0,l:0 } };
+  let gexStats = { 'positive':{ w:0,l:0 }, 'neutral':{ w:0,l:0 }, 'cautious':{ w:0,l:0 }, 'negative':{ w:0,l:0 } };
+  const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+  for (let i = 0; i < HIST_DATA.length; i++) {
+    const [date, open, high, low, close, vix] = HIST_DATA[i];
+    const dow = new Date(date).getDay();
+    const dayName = dayNames[dow];
+    if (dow === 0 || dow === 6) continue;
+
+    const iv = vix / 100;
+    const T = (3.5/24)/365;
+    const r = 0.045;
+
+    // ── Determine strategy ──
+    let strat = strategy;
+    let biasLabel = '';
+    let skipDay = false;
+
+    if (strategy === 'auto') {
+      const s200 = sma200[i];
+      const gex = gexProxy[i];
+
+      if (s200 === null) {
+        strat = 'put';
+        biasLabel = 'No200SMA';
+      } else {
+        const aboveSMA = close > s200;
+        const distPct = Math.abs(close - s200) / s200;
+
+        if (aboveSMA) {
+          strat = 'put';
+          biasLabel = 'BULL→Put';
+        } else {
+          strat = 'call';
+          biasLabel = 'BEAR→Call';
+        }
+
+        if (gex === 'negative' && vix > 28) {
+          skipDay = true;
+          biasLabel = 'CAUTION→Skip';
+        }
+
+        if (gex === 'cautious' && vix > 25) {
+          skipDay = true;
+          biasLabel = 'CAUTION→Skip';
+        }
+
+        if (!skipDay && distPct < 0.005 && gex !== 'negative') {
+          strat = 'ic';
+          biasLabel = 'NEUT→IC';
+        }
+      }
+    }
+
+    if (skipDay) {
+      if (biasStats[biasLabel]) biasStats[biasLabel].skipped = (biasStats[biasLabel].skipped || 0) + 1;
+      continue;
+    }
+
+    // ── Calculate contracts (margin-aware) ──
+    const estCredit = Math.min(width * 0.08, 1.50);
+    const marginPerCt = (width - estCredit) * 100;
+    let cts;
+    if (contractMode === 'phase') {
+      const ph = getPhaseForCap(capital);
+      const baseMargin = 1400;
+      const marginRatio = marginPerCt / baseMargin;
+      const adjPerK = ph.perK > 0 ? ph.perK * marginRatio : 0;
+      cts = adjPerK > 0 ? Math.max(1, Math.floor(capital / adjPerK)) : 2;
+    } else {
+      cts = Math.max(1, Math.floor(capital / (marginPerCt * 6)));
+    }
+
+    // GEX-based size adjustment
+    const gex = gexProxy[i];
+    if (strategy === 'auto') {
+      if (gex === 'cautious') cts = Math.max(1, Math.round(cts * 0.5));
+      if (gex === 'negative') cts = 1;
+    }
+
+    // Find strikes
+    const sP = findStrike(open, iv, T, delta, 'put'), lP = sP - width;
+    const sC = findStrike(open, iv, T, delta, 'call'), lC = sC + width;
+
+    // Calculate credits
+    const putCredit = Math.max(bsm(open,sP,T,r,iv,'put').price - bsm(open,lP,T,r,iv,'put').price - SLIPPAGE, 0);
+    const callCredit = Math.max(bsm(open,sC,T,r,iv,'call').price - bsm(open,lC,T,r,iv,'call').price - SLIPPAGE, 0);
+    const icCredit = putCredit + callCredit;
+
+    let credit;
+    if (strat === 'ic') credit = icCredit;
+    else if (strat === 'call') credit = callCredit;
+    else credit = putCredit;
+
+    if (!(credit >= minCredit)) continue;
+
+    // ── Breach detection with proximity model ──
+    const dailyRange = high - low;
+    const arvoFraction = 0.54;
+    const arvoRange = dailyRange * arvoFraction;
+    const arvoLow = Math.min(close, open) - arvoRange * 0.3;
+    const arvoHigh = Math.max(close, open) + arvoRange * 0.3;
+    const putBuffer = open - sP;
+    const callBuffer = sC - open;
+    const putStopLevel = sP + putBuffer * proximity;
+    const callStopLevel = sC - callBuffer * proximity;
+    let putBreached = arvoLow <= putStopLevel;
+    let callBreached = arvoHigh >= callStopLevel;
+    let result, pnl;
+
+    let stopPrice, earlyStopPrice, lateStopPrice, emergencyStopPrice;
+    if (stopMode === 'premium') {
+      stopPrice = credit * stopVal;
+    } else if (stopMode === 'timegated') {
+      earlyStopPrice = credit * 2;
+      lateStopPrice = credit * 1.5;
+      emergencyStopPrice = credit * 3;
+      stopPrice = lateStopPrice;
+    } else if (stopMode === 'points') {
+      stopPrice = null;
+    } else {
+      stopPrice = credit * 2.5;
+    }
+
+    const closePos = (high !== low) ? (close - low) / (high - low) : 0.5;
+
+    let putStopped = putBreached;
+    let callStopped = callBreached;
+
+    if (stopMode === 'timegated' && (putBreached || callBreached)) {
+      if (putBreached) {
+        if (closePos > 0.6) {
+          const putBuffer = open - sP;
+          const moveDepth = putBuffer > 0 ? (open - arvoLow) / putBuffer : 1;
+          putStopped = moveDepth > 0.85;
+        }
+      }
+      if (callBreached) {
+        if (closePos < 0.4) {
+          const callBuffer = sC - open;
+          const moveDepth = callBuffer > 0 ? (arvoHigh - open) / callBuffer : 1;
+          callStopped = moveDepth > 0.85;
+        }
+      }
+    }
+
+    function tieredLoss(cr, cts, isEarlyNoise) {
+      if (stopMode === 'timegated') {
+        const sp = isEarlyNoise ? earlyStopPrice : lateStopPrice;
+        return -(sp - cr) * cts * 100;
+      }
+      return -(stopPrice - cr) * cts * 100;
+    }
+    const putEarlyNoise = putBreached && closePos > 0.4;
+    const callEarlyNoise = callBreached && closePos < 0.6;
+
+    if (strat === 'put') {
+      if (stopMode === 'points' && arvoLow <= (sP - stopVal)) {
+        result = 'LOSS';
+        pnl = -(stopVal / width) * (width - credit) * cts * 100;
+      } else if (putStopped && (stopPrice || stopMode === 'timegated')) {
+        result = 'LOSS';
+        pnl = tieredLoss(credit, cts, putEarlyNoise);
+      } else if (putBreached && !putStopped) {
+        result = 'WIN';
+        pnl = credit * profitPct * cts * 100;
+      } else {
+        result = 'WIN';
+        pnl = credit * profitPct * cts * 100;
+      }
+    } else if (strat === 'call') {
+      if (stopMode === 'points' && arvoHigh >= (sC + stopVal)) {
+        result = 'LOSS';
+        pnl = -(stopVal / width) * (width - credit) * cts * 100;
+      } else if (callStopped && (stopPrice || stopMode === 'timegated')) {
+        result = 'LOSS';
+        pnl = tieredLoss(credit, cts, callEarlyNoise);
+      } else if (callBreached && !callStopped) {
+        result = 'WIN';
+        pnl = credit * profitPct * cts * 100;
+      } else {
+        result = 'WIN';
+        pnl = credit * profitPct * cts * 100;
+      }
+    } else { // IC
+      if (stopMode === 'points' && (arvoLow <= (sP - stopVal) || arvoHigh >= (sC + stopVal))) {
+        result = 'LOSS';
+        pnl = -(stopVal / width) * (width - icCredit) * cts * 100;
+      } else if ((putStopped || callStopped) && (stopPrice || stopMode === 'timegated')) {
+        result = 'LOSS';
+        const icEarly = putStopped ? putEarlyNoise : callEarlyNoise;
+        pnl = tieredLoss(icCredit, cts, icEarly);
+      } else if ((putBreached || callBreached) && !(putStopped || callStopped)) {
+        result = 'WIN';
+        pnl = icCredit * profitPct * cts * 100;
+      } else {
+        result = 'WIN';
+        pnl = icCredit * profitPct * cts * 100;
+      }
+    }
+
+    capital += pnl;
+    if (capital < 0) capital = 0;
+
+    trades.push({ date, strat, credit: credit.toFixed(2), cts, result, pnl: Math.round(pnl), capital: Math.round(capital), vix, dayName, bias: biasLabel, gex });
+    equity.push({ date, value: Math.round(capital) });
+
+    if (capital > maxEquity) maxEquity = capital;
+    const dd = (maxEquity - capital) / maxEquity;
+    if (dd > maxDrawdown) maxDrawdown = dd;
+
+    const month = date.slice(0,7);
+    if (!monthlyPnL[month]) monthlyPnL[month] = 0;
+    monthlyPnL[month] += pnl;
+
+    if (dayOfWeekStats[dayName]) {
+      if (result === 'WIN') dayOfWeekStats[dayName].w++;
+      else dayOfWeekStats[dayName].l++;
+    }
+
+    let bucket;
+    if (vix < 15) bucket = 'VIX<15';
+    else if (vix < 20) bucket = '15-20';
+    else if (vix < 25) bucket = '20-25';
+    else if (vix < 30) bucket = '25-30';
+    else bucket = 'VIX>30';
+    if (result === 'WIN') vixBuckets[bucket].w++;
+    else vixBuckets[bucket].l++;
+
+    if (biasLabel && biasStats[biasLabel]) {
+      if (result === 'WIN') biasStats[biasLabel].w++;
+      else biasStats[biasLabel].l++;
+    }
+
+    if (gexStats[gex]) {
+      if (result === 'WIN') gexStats[gex].w++;
+      else gexStats[gex].l++;
+    }
+  }
+
+  // Calculate summary stats
+  const wins = trades.filter(t => t.result === 'WIN').length;
+  const losses = trades.filter(t => t.result === 'LOSS').length;
+  const total = trades.length;
+  const winRate = total > 0 ? (wins/total*100).toFixed(1) : '0';
+  const totalPnL = Math.round(capital - startCap);
+  const avgWin = wins > 0 ? Math.round(trades.filter(t=>t.result==='WIN').reduce((s,t)=>s+t.pnl,0)/wins) : 0;
+  const avgLoss = losses > 0 ? Math.round(trades.filter(t=>t.result==='LOSS').reduce((s,t)=>s+t.pnl,0)/losses) : 0;
+  const profitFactor = losses > 0 && avgLoss !== 0 ? ((wins * avgWin) / Math.abs(losses * avgLoss)).toFixed(2) : '∞';
+  const roi = ((capital - startCap) / startCap * 100).toFixed(1);
+
+  let maxLoseStreak = 0, curStreak = 0;
+  trades.forEach(t => { if(t.result==='LOSS') { curStreak++; maxLoseStreak=Math.max(maxLoseStreak,curStreak); } else curStreak=0; });
+
+  // Render results
+  const el = document.getElementById('bt-results');
+  el.innerHTML = `
+    <!-- SUMMARY STATS -->
+    <div style="display:grid;grid-template-columns:repeat(8,1fr);gap:8px;margin-bottom:12px">
+      ${[
+        { l:'TOTAL TRADES', v:total, c:'var(--white)' },
+        { l:'WIN RATE', v:winRate+'%', c:parseFloat(winRate)>=75?'var(--green)':parseFloat(winRate)>=60?'var(--gold)':'var(--red)' },
+        { l:'TOTAL P&L', v:(totalPnL>=0?'+':'')+totalPnL.toLocaleString(), c:totalPnL>=0?'var(--green)':'var(--red)' },
+        { l:'ROI', v:roi+'%', c:parseFloat(roi)>=0?'var(--green)':'var(--red)' },
+        { l:'PROFIT FACTOR', v:profitFactor, c:parseFloat(profitFactor)>=1.5?'var(--green)':parseFloat(profitFactor)>=1?'var(--gold)':'var(--red)' },
+        { l:'MAX DRAWDOWN', v:(maxDrawdown*100).toFixed(1)+'%', c:maxDrawdown<0.1?'var(--green)':maxDrawdown<0.2?'var(--gold)':'var(--red)' },
+        { l:'AVG WIN/LOSS', v:'$'+avgWin+' / $'+avgLoss, c:'var(--white)' },
+        { l:'MAX LOSE STREAK', v:maxLoseStreak+' days', c:maxLoseStreak<=3?'var(--green)':maxLoseStreak<=5?'var(--gold)':'var(--red)' },
+      ].map(s=>`<div class="panel" style="padding:12px"><div style="font-size:9px;color:var(--textDim);letter-spacing:1px;margin-bottom:4px">${s.l}</div><div class="chakra" style="font-size:18px;font-weight:700;color:${s.c}">${s.v}</div></div>`).join('')}
+    </div>
+
+    <!-- EQUITY CURVE -->
+    <div class="panel" style="padding:16px;margin-bottom:12px">
+      <div style="font-size:12px;color:var(--textDim);letter-spacing:2px;margin-bottom:12px">EQUITY CURVE</div>
+      <canvas id="bt-equity" width="1200" height="300" style="width:100%;height:300px"></canvas>
+    </div>
+
+    <!-- BREAKDOWNS ROW 1 -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
+      <!-- DAY OF WEEK -->
+      <div class="panel" style="padding:14px">
+        <div style="font-size:11px;color:var(--textDim);letter-spacing:2px;margin-bottom:10px">WIN RATE BY DAY</div>
+        ${Object.entries(dayOfWeekStats).map(([day,s])=>{
+          const t=s.w+s.l; const wr=t>0?(s.w/t*100).toFixed(0):'–';
+          const c = parseInt(wr)>=80?'var(--green)':parseInt(wr)>=65?'var(--gold)':'var(--red)';
+          return `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">
+            <span style="font-size:12px;color:var(--text)">${day}</span>
+            <span style="font-size:12px;color:var(--textDim)">${s.w}W ${s.l}L</span>
+            <span class="chakra" style="font-size:14px;font-weight:700;color:${c}">${wr}%</span>
+          </div>`;
+        }).join('')}
+      </div>
+      <!-- VIX REGIME -->
+      <div class="panel" style="padding:14px">
+        <div style="font-size:11px;color:var(--textDim);letter-spacing:2px;margin-bottom:10px">WIN RATE BY VIX</div>
+        ${Object.entries(vixBuckets).map(([bucket,s])=>{
+          const t=s.w+s.l; const wr=t>0?(s.w/t*100).toFixed(0):'–';
+          const c = parseInt(wr)>=80?'var(--green)':parseInt(wr)>=65?'var(--gold)':'var(--red)';
+          return `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">
+            <span style="font-size:12px;color:var(--text)">${bucket}</span>
+            <span style="font-size:12px;color:var(--textDim)">${s.w}W ${s.l}L</span>
+            <span class="chakra" style="font-size:14px;font-weight:700;color:${c}">${wr}%</span>
+          </div>`;
+        }).join('')}
+      </div>
+      <!-- MONTHLY P&L -->
+      <div class="panel" style="padding:14px;max-height:300px;overflow-y:auto">
+        <div style="font-size:11px;color:var(--textDim);letter-spacing:2px;margin-bottom:10px">MONTHLY P&L</div>
+        ${Object.entries(monthlyPnL).map(([m,pnl])=>{
+          const c = pnl>=0?'var(--green)':'var(--red)';
+          return `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border)">
+            <span style="font-size:11px;color:var(--text)">${m}</span>
+            <span class="mono" style="font-size:12px;font-weight:700;color:${c}">${pnl>=0?'+':''}$${Math.round(pnl).toLocaleString()}</span>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+
+    <!-- BREAKDOWNS ROW 2: BIAS + GEX (only shown in Auto mode) -->
+    ${strategy === 'auto' ? `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+      <!-- BIAS FILTER STATS -->
+      <div class="panel" style="padding:14px">
+        <div style="font-size:11px;color:var(--textDim);letter-spacing:2px;margin-bottom:10px">BIAS FILTER (200 SMA + VIX/GEX)</div>
+        ${Object.entries(biasStats).map(([label,s])=>{
+          const t=s.w+s.l; const wr=t>0?(s.w/t*100).toFixed(0):'–';
+          const c = parseInt(wr)>=80?'var(--green)':parseInt(wr)>=65?'var(--gold)':'var(--red)';
+          const skipped = s.skipped || 0;
+          const labelColor = label.includes('BULL')?'var(--green)':label.includes('BEAR')?'var(--red)':label.includes('NEUT')?'var(--cyan)':'var(--gold)';
+          return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">' +
+            '<span style="font-size:11px;color:' + labelColor + ';font-weight:700">' + label + '</span>' +
+            '<span style="font-size:11px;color:var(--textDim)">' + (t > 0 ? s.w + 'W ' + s.l + 'L' : '') + (skipped > 0 ? ' · ' + skipped + ' skipped' : '') + '</span>' +
+            '<span class="chakra" style="font-size:14px;font-weight:700;color:' + (t > 0 ? c : 'var(--textDim)') + '">' + (t > 0 ? wr + '%' : '–') + '</span>' +
+          '</div>';
+        }).join('')}
+        <div style="margin-top:8px;font-size:10px;color:var(--textDim)">
+          Auto strategy uses close vs 200 SMA (structural trend) + VIX/GEX filter. Skips high-risk days with negative GEX + elevated VIX.
+        </div>
+      </div>
+      <!-- GEX PROXY STATS -->
+      <div class="panel" style="padding:14px">
+        <div style="font-size:11px;color:var(--textDim);letter-spacing:2px;margin-bottom:10px">⚡ MARKET MECHANICS (GEX PROXY)</div>
+        ${Object.entries(gexStats).map(([gex,s])=>{
+          const t=s.w+s.l; const wr=t>0?(s.w/t*100).toFixed(0):'–';
+          const c = parseInt(wr)>=80?'var(--green)':parseInt(wr)>=65?'var(--gold)':'var(--red)';
+          const gexLabels = { positive: '+GEX (Low VIX, Falling)', neutral: 'Neutral GEX', cautious: 'Cautious (Elevated VIX)', negative: '-GEX (High VIX, Spiking)' };
+          const gexColors = { positive: 'var(--green)', neutral: 'var(--cyan)', cautious: 'var(--gold)', negative: 'var(--red)' };
+          return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">' +
+            '<span style="font-size:11px;color:' + gexColors[gex] + ';font-weight:700">' + gexLabels[gex] + '</span>' +
+            '<span style="font-size:11px;color:var(--textDim)">' + s.w + 'W ' + s.l + 'L</span>' +
+            '<span class="chakra" style="font-size:14px;font-weight:700;color:' + c + '">' + (t > 0 ? wr + '%' : '–') + '</span>' +
+          '</div>';
+        }).join('')}
+        <div style="margin-top:8px;font-size:10px;color:var(--textDim)">
+          GEX approximated from VIX level + 5-day VIX change. +GEX = mean-reversion (good for credit spreads). -GEX = trending (skip or reduce size).
+        </div>
+      </div>
+    </div>` : ''}
+
+    <!-- COMPOUNDING MILESTONES -->
+    <div class="panel" style="padding:16px;margin-bottom:12px">
+      <div style="font-size:12px;color:var(--textDim);letter-spacing:2px;margin-bottom:12px">COMPOUNDING GROWTH — CAPITAL MILESTONES</div>
+      <canvas id="bt-compound" width="1200" height="280" style="width:100%;height:280px"></canvas>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:14px">
+        ${(() => {
+          const milestones = [25000, 50000, 75000, 100000, 250000, 500000, 1000000];
+          return milestones.map(m => {
+            const hit = equity.find(e => e.value >= m);
+            const label = m >= 1000000 ? '$' + (m/1000000) + 'M' : '$' + (m/1000).toFixed(0) + 'K';
+            if (hit) {
+              const startDate = new Date(equity[0].date);
+              const hitDate = new Date(hit.date);
+              const days = Math.round((hitDate - startDate) / (1000*60*60*24));
+              return '<div class="panel" style="padding:10px 14px;flex:1;min-width:120px;border-left:3px solid var(--green)">' +
+                '<div style="font-size:9px;color:var(--textDim);letter-spacing:1px;margin-bottom:3px">' + label + '</div>' +
+                '<div class="chakra" style="font-size:14px;font-weight:700;color:var(--green)">' + hit.date + '</div>' +
+                '<div style="font-size:10px;color:var(--textMid);margin-top:2px">' + days + ' trading days</div></div>';
+            } else {
+              return '<div class="panel" style="padding:10px 14px;flex:1;min-width:120px;border-left:3px solid var(--border)">' +
+                '<div style="font-size:9px;color:var(--textDim);letter-spacing:1px;margin-bottom:3px">' + label + '</div>' +
+                '<div class="chakra" style="font-size:14px;font-weight:700;color:var(--textDim)">Not reached</div></div>';
+            }
+          }).join('');
+        })()}
+      </div>
+    </div>
+
+    <!-- TRADE LOG (last 50) -->
+    <div class="panel" style="padding:14px;max-height:400px;overflow-y:auto">
+      <div style="font-size:11px;color:var(--textDim);letter-spacing:2px;margin-bottom:10px">RECENT TRADES (last 50)</div>
+      <div style="display:grid;grid-template-columns:${strategy==='auto'?'85px 40px 55px 55px 45px 40px 85px 55px 55px 75px':'90px 50px 60px 60px 50px 50px 70px 80px'};gap:0;font-size:10px;color:var(--textDim);letter-spacing:1px;padding:4px 0;border-bottom:1px solid var(--border)">
+        <div>DATE</div><div>DAY</div><div>STRAT</div><div>CREDIT</div><div>VIX</div><div>CTS</div>${strategy==='auto'?'<div>BIAS</div><div>GEX</div>':''}<div>RESULT</div><div>P&L</div>
+      </div>
+      ${trades.slice(-50).reverse().map(t=>{
+        const gexColors = { positive:'var(--green)', neutral:'var(--cyan)', cautious:'var(--gold)', negative:'var(--red)' };
+        const gexLabels = { positive:'+GEX', neutral:'NEUT', cautious:'CAUT', negative:'-GEX' };
+        return `<div style="display:grid;grid-template-columns:${strategy==='auto'?'85px 40px 55px 55px 45px 40px 85px 55px 55px 75px':'90px 50px 60px 60px 50px 50px 70px 80px'};gap:0;padding:4px 0;border-bottom:1px solid var(--border);font-size:11px">
+          <div style="color:var(--text)">${t.date}</div>
+          <div style="color:var(--textDim)">${t.dayName}</div>
+          <div style="color:${t.strat==='put'?'var(--green)':t.strat==='call'?'var(--orange)':'var(--cyan)'}">${t.strat.toUpperCase()}</div>
+          <div style="color:var(--text)">$${t.credit}</div>
+          <div style="color:${t.vix>25?'var(--red)':t.vix>18?'var(--gold)':'var(--green)'}">${t.vix.toFixed(0)}</div>
+          <div style="color:var(--text)">${t.cts}</div>
+          ${strategy==='auto'?'<div style="font-size:9px;color:'+(t.bias.includes('BULL')?'var(--green)':t.bias.includes('BEAR')?'var(--red)':'var(--cyan)')+'">'+t.bias+'</div><div style="font-size:9px;color:'+(gexColors[t.gex]||'var(--textDim)')+'">'+( gexLabels[t.gex]||'')+'</div>':''}
+          <div style="color:${t.result==='WIN'?'var(--green)':'var(--red)'};font-weight:700">${t.result}</div>
+          <div class="mono" style="color:${t.pnl>=0?'var(--green)':'var(--red)'};font-weight:700">${t.pnl>=0?'+':''}$${t.pnl.toLocaleString()}</div>
+        </div>`;
+      }).join('')}
+    </div>`;
+
+  // Draw equity curve
+  setTimeout(() => {
+    const canvas = document.getElementById('bt-equity');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0,0,W,H);
+
+    const vals = equity.map(e=>e.value);
+    const minV = Math.min(...vals) * 0.95;
+    const maxV = Math.max(...vals) * 1.05;
+    const range = maxV - minV || 1;
+
+    // Grid lines
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i <= 4; i++) {
+      const y = H - (i/4) * H;
+      ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke();
+      ctx.fillStyle = '#666';
+      ctx.font = '11px monospace';
+      ctx.fillText('$'+Math.round(minV + (i/4)*range).toLocaleString(), 4, y-4);
+    }
+
+    // Starting capital line
+    const startY = H - ((startCap - minV) / range) * H;
+    ctx.strokeStyle = '#555';
+    ctx.setLineDash([5,5]);
+    ctx.beginPath(); ctx.moveTo(0,startY); ctx.lineTo(W,startY); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Equity line
+    ctx.beginPath();
+    ctx.strokeStyle = capital >= startCap ? '#00D084' : '#FF4757';
+    ctx.lineWidth = 2;
+    equity.forEach((e,i) => {
+      const x = (i/(equity.length-1)) * W;
+      const y = H - ((e.value - minV) / range) * H;
+      if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    });
+    ctx.stroke();
+
+    // Fill under
+    const lastX = W, lastY = H - ((equity[equity.length-1].value - minV) / range) * H;
+    ctx.lineTo(lastX, H); ctx.lineTo(0, H); ctx.closePath();
+    ctx.fillStyle = capital >= startCap ? 'rgba(0,208,132,0.08)' : 'rgba(255,71,87,0.08)';
+    ctx.fill();
+
+    // Draw compounding growth chart (log scale)
+    const cCanvas = document.getElementById('bt-compound');
+    if (cCanvas && equity.length > 1) {
+      const cCtx = cCanvas.getContext('2d');
+      const cW = cCanvas.width, cH = cCanvas.height;
+      cCtx.clearRect(0, 0, cW, cH);
+
+      const cVals = equity.map(e => Math.max(1, e.value));
+      const logMin = Math.log10(Math.min(...cVals) * 0.9);
+      const logMax = Math.log10(Math.max(...cVals) * 1.1);
+      const logRange = logMax - logMin || 1;
+
+      // Milestone lines
+      const milestones = [10000, 25000, 50000, 75000, 100000, 250000, 500000, 1000000];
+      const mColors = { 10000: '#555', 25000: '#F0B429', 50000: '#3B9EFF', 75000: '#A855F7', 100000: '#00D084', 250000: '#00E5FF', 500000: '#FF6B35', 1000000: '#FF4757' };
+      milestones.forEach(m => {
+        const logM = Math.log10(m);
+        if (logM >= logMin && logM <= logMax) {
+          const y = cH - ((logM - logMin) / logRange) * cH;
+          cCtx.strokeStyle = mColors[m] || '#444';
+          cCtx.lineWidth = 0.5;
+          cCtx.setLineDash([4, 4]);
+          cCtx.beginPath(); cCtx.moveTo(0, y); cCtx.lineTo(cW, y); cCtx.stroke();
+          cCtx.setLineDash([]);
+          const label = m >= 1000000 ? '$' + (m / 1000000) + 'M' : '$' + (m / 1000) + 'K';
+          cCtx.fillStyle = mColors[m] || '#666';
+          cCtx.font = '11px monospace';
+          cCtx.fillText(label, 4, y - 4);
+        }
+      });
+
+      // Equity line (log scale)
+      cCtx.beginPath();
+      cCtx.strokeStyle = '#00D084';
+      cCtx.lineWidth = 2;
+      equity.forEach((e, i) => {
+        const x = (i / (equity.length - 1)) * cW;
+        const y = cH - ((Math.log10(Math.max(1, e.value)) - logMin) / logRange) * cH;
+        if (i === 0) cCtx.moveTo(x, y); else cCtx.lineTo(x, y);
+      });
+      cCtx.stroke();
+
+      // Fill under
+      const cLastX = cW;
+      cCtx.lineTo(cLastX, cH); cCtx.lineTo(0, cH); cCtx.closePath();
+      cCtx.fillStyle = 'rgba(0,208,132,0.06)';
+      cCtx.fill();
+
+      // Phase markers
+      const phases = [{ cap: 25000, label: 'P2', color: '#F0B429' }, { cap: 75000, label: 'P3', color: '#A855F7' }, { cap: 300000, label: 'P4', color: '#00E5FF' }];
+      phases.forEach(p => {
+        const idx = equity.findIndex(e => e.value >= p.cap);
+        if (idx > 0) {
+          const x = (idx / (equity.length - 1)) * cW;
+          cCtx.strokeStyle = p.color;
+          cCtx.lineWidth = 1;
+          cCtx.setLineDash([3, 3]);
+          cCtx.beginPath(); cCtx.moveTo(x, 0); cCtx.lineTo(x, cH); cCtx.stroke();
+          cCtx.setLineDash([]);
+          cCtx.fillStyle = p.color;
+          cCtx.font = 'bold 12px sans-serif';
+          cCtx.fillText(p.label, x + 4, 14);
+        }
+      });
+    }
+  }, 100);
+}
+</script>
+</body>
+</html>
