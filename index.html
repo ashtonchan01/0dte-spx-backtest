@@ -88,6 +88,8 @@ input, select, button, textarea { font-family: 'IBM Plex Mono', monospace; outli
     <div class="form-group">
       <label>STOP LOSS MODE</label>
       <select id="bt-stopMode" style="font-size:12px" onchange="updateStopDesc()">
+        <option value="none">No Stop (hold to expiry)</option>
+        <option value="strike">Strike Breach (binary)</option>
         <option value="premium">Premium Multiple</option>
         <option value="timegated" selected>Time-Gated (2hr delay)</option>
         <option value="points">SPX Points</option>
@@ -112,6 +114,7 @@ input, select, button, textarea { font-family: 'IBM Plex Mono', monospace; outli
     <div class="form-group">
       <label>SPREAD WIDTH</label>
       <select id="bt-width" style="font-size:12px">
+        <option value="5">5 pts</option>
         <option value="10">10 pts</option>
         <option value="15" selected>15 pts</option>
         <option value="20">20 pts</option>
@@ -225,7 +228,9 @@ function updateStopDesc() {
   const desc = document.getElementById('bt-stopDesc');
   const valInput = document.getElementById('bt-stopVal');
   valInput.disabled = false;
-  if (mode === 'premium') { desc.innerHTML = '× credit received<br><span style="color:var(--gold)">e.g. 2× = close if spread hits 2× your credit ($1.00 → stop at $2.00)</span>'; valInput.value = '2'; valInput.step = '0.5'; }
+  if (mode === 'none') { desc.innerHTML = '<span style="color:var(--cyan)">No stop loss — hold to expiry</span><br><span style="color:var(--gold)">Pure theta decay play</span><br><span style="color:var(--textDim)">Win = expire OTM, Loss = expire ITM (max loss = width - credit)</span>'; valInput.value = '0'; valInput.step = '1'; valInput.disabled = true; }
+  else if (mode === 'strike') { desc.innerHTML = '<span style="color:var(--cyan)">SPX touches short strike → close immediately</span><br><span style="color:var(--gold)">3:00 PM time stop · 50% profit target · 1.5% risk sizing</span><br><span style="color:var(--textDim)">Binary exit: thesis wrong = out. No P&L-based stop.</span>'; valInput.value = '0'; valInput.step = '1'; valInput.disabled = true; }
+  else if (mode === 'premium') { desc.innerHTML = '× credit received<br><span style="color:var(--gold)">e.g. 2× = close if spread hits 2× your credit ($1.00 → stop at $2.00)</span>'; valInput.value = '2'; valInput.step = '0.5'; }
   else if (mode === 'timegated') { desc.innerHTML = 'Two-tier stop system<br><span style="color:var(--gold)">2× wide first 2hrs (noise protection)</span><br><span style="color:var(--red)">1.5× tight after 2hrs (theta decayed)</span><br><span style="color:var(--textDim)">3× emergency always active</span>'; valInput.value = '2'; valInput.step = '0.5'; valInput.disabled = true; }
   else if (mode === 'points') { desc.innerHTML = 'SPX points past short strike<br><span style="color:var(--gold)">e.g. 10 = close if SPX moves 10pts through your short strike</span>'; valInput.value = '10'; valInput.step = '5'; }
   else { desc.innerHTML = '× credit (time-weighted avg)<br><span style="color:var(--gold)">Simulates tighter stops later in session (avg 2.5× across day)</span>'; valInput.value = '2.5'; valInput.step = '0.5'; }
@@ -354,7 +359,12 @@ function runBacktest() {
     const estCredit = Math.min(width * 0.08, 1.50);
     const marginPerCt = (width - estCredit) * 100;
     let cts;
-    if (contractMode === 'phase') {
+    if (stopMode === 'strike') {
+      // 1.5% account risk sizing: max loss per trade = 1.5% of capital
+      const maxRisk = capital * 0.015;
+      const maxLossPerCt = (width - estCredit) * 100; // max loss per spread
+      cts = Math.max(1, Math.floor(maxRisk / maxLossPerCt));
+    } else if (contractMode === 'phase') {
       const ph = getPhaseForCap(capital);
       const baseMargin = 1400;
       const marginRatio = marginPerCt / baseMargin;
@@ -387,108 +397,245 @@ function runBacktest() {
 
     if (!(credit >= minCredit)) continue;
 
-    // ── Breach detection with proximity model ──
+    // ── Breach detection ──
     const dailyRange = high - low;
-    const arvoFraction = hoursToExpiry / 6.5; // scales with entry time: earlier = more of daily range ahead
+    const arvoFraction = hoursToExpiry / 6.5;
     const arvoRange = dailyRange * arvoFraction;
     const arvoLow = Math.min(close, open) - arvoRange * 0.3;
     const arvoHigh = Math.max(close, open) + arvoRange * 0.3;
     const putBuffer = open - sP;
     const callBuffer = sC - open;
-    const putStopLevel = sP + putBuffer * proximity;
-    const callStopLevel = sC - callBuffer * proximity;
-    let putBreached = arvoLow <= putStopLevel;
-    let callBreached = arvoHigh >= callStopLevel;
     let result, pnl;
 
-    let stopPrice, earlyStopPrice, lateStopPrice, emergencyStopPrice;
-    if (stopMode === 'premium') {
-      stopPrice = credit * stopVal;
-    } else if (stopMode === 'timegated') {
-      earlyStopPrice = credit * 2;
-      lateStopPrice = credit * 1.5;
-      emergencyStopPrice = credit * 3;
-      stopPrice = lateStopPrice;
-    } else if (stopMode === 'points') {
-      stopPrice = null;
+    if (stopMode === 'none') {
+      // ══════════════════════════════════════════════════════════════
+      // NO STOP — pure hold to expiry
+      // Win = expire OTM (keep full credit), Loss = expire ITM (max loss)
+      // ══════════════════════════════════════════════════════════════
+      if (strat === 'put') {
+        result = close > sP ? 'WIN' : 'LOSS';
+        pnl = result === 'WIN' ? credit * cts * 100 : -(width - credit) * cts * 100;
+      } else if (strat === 'call') {
+        result = close < sC ? 'WIN' : 'LOSS';
+        pnl = result === 'WIN' ? credit * cts * 100 : -(width - credit) * cts * 100;
+      } else { // IC
+        result = (close > sP && close < sC) ? 'WIN' : 'LOSS';
+        pnl = result === 'WIN' ? icCredit * cts * 100 : -(width - (strat === 'ic' ? icCredit : credit)) * cts * 100;
+      }
+    } else if (stopMode === 'strike') {
+      // ══════════════════════════════════════════════════════════════
+      // STRIKE BREACH MODE — Your exact decision tree:
+      //   1. SPX touches short strike → close immediately (max loss)
+      //   2. 50% profit target hit → close automatically
+      //   3. 3:00 PM time stop → close whatever remains
+      //   4. Size so max loss = 1.5% of account (handled above)
+      // ══════════════════════════════════════════════════════════════
+
+      // Did SPX reach the short strike at any point during the session?
+      // We estimate intraday extremes from OHLC data
+      const putStrikeBreach = low <= sP;       // SPX dropped to/below put short strike
+      const callStrikeBreach = high >= sC;     // SPX rose to/above call short strike
+
+      // Time stop: close at 3:00 PM = 1hr before 4PM close
+      // After entry, the remaining session is hoursToExpiry hours
+      // 3:00 PM stop means we only hold for (hoursToExpiry - 1.0) hours out of hoursToExpiry
+      // If entry is after 3PM (hoursToExpiry <= 1.0), time stop = immediate close at entry
+      const holdFraction = hoursToExpiry > 1.0 ? (hoursToExpiry - 1.0) / hoursToExpiry : 0;
+
+      // Estimate if the breach happened before or after our time stop
+      // closePos: where close sits in the day's range (0=low, 1=high)
+      const closePos = (high !== low) ? (close - low) / (high - low) : 0.5;
+
+      // 50% profit target: credit × 0.5 kept = half the credit
+      const profitTarget = credit * 0.5;
+
+      if (strat === 'put') {
+        if (putStrikeBreach) {
+          // SPX hit our short put strike — thesis is wrong, close for max loss
+          // Loss = (width - credit) per spread (capped at max loss)
+          result = 'LOSS';
+          pnl = -(width - credit) * cts * 100;
+        } else {
+          // SPX never reached short strike
+          // Did the 50% profit target fill? (more likely if SPX stayed far from strike)
+          const distFromStrike = (arvoLow - sP) / putBuffer; // how far lowest point stayed from strike (>0 = safe)
+          const profitHit = distFromStrike > 0.3; // stayed well away → theta decay fills the 50% target
+          if (profitHit) {
+            result = 'WIN';
+            pnl = profitTarget * cts * 100;
+          } else {
+            // 3:00 PM time stop — close at whatever mark-to-market is
+            // Estimate remaining premium: if SPX is near strike, still risky; if far, mostly decayed
+            const safetyRatio = putBuffer > 0 ? Math.max(0, (arvoLow - sP)) / putBuffer : 0;
+            const timeDecay = holdFraction; // theta earned by 3PM
+            const estPremiumKept = credit * Math.min(1, safetyRatio * 0.5 + timeDecay * 0.6);
+            result = estPremiumKept > credit * 0.2 ? 'WIN' : 'LOSS';
+            pnl = (estPremiumKept - (credit - credit)) * cts * 100; // net = premium kept
+            pnl = estPremiumKept * cts * 100 - (credit - estPremiumKept < 0 ? 0 : 0);
+            // Simplified: you keep whatever theta + distance gave you by 3PM
+            pnl = (estPremiumKept >= credit * 0.5 ? profitTarget : estPremiumKept) * cts * 100;
+            if (estPremiumKept < credit * 0.2) {
+              // Very close to strike at 3PM — small loss
+              pnl = -(credit * 0.3) * cts * 100;
+              result = 'LOSS';
+            }
+          }
+        }
+      } else if (strat === 'call') {
+        if (callStrikeBreach) {
+          result = 'LOSS';
+          pnl = -(width - credit) * cts * 100;
+        } else {
+          const distFromStrike = (sC - arvoHigh) / callBuffer;
+          const profitHit = distFromStrike > 0.3;
+          if (profitHit) {
+            result = 'WIN';
+            pnl = profitTarget * cts * 100;
+          } else {
+            const safetyRatio = callBuffer > 0 ? Math.max(0, (sC - arvoHigh)) / callBuffer : 0;
+            const timeDecay = holdFraction;
+            const estPremiumKept = credit * Math.min(1, safetyRatio * 0.5 + timeDecay * 0.6);
+            if (estPremiumKept >= credit * 0.5) {
+              result = 'WIN';
+              pnl = profitTarget * cts * 100;
+            } else if (estPremiumKept < credit * 0.2) {
+              result = 'LOSS';
+              pnl = -(credit * 0.3) * cts * 100;
+            } else {
+              result = 'WIN';
+              pnl = estPremiumKept * cts * 100;
+            }
+          }
+        }
+      } else { // IC
+        const putStrike = putStrikeBreach;
+        const callStrike = callStrikeBreach;
+        if (putStrike || callStrike) {
+          result = 'LOSS';
+          pnl = -(width - icCredit) * cts * 100;
+        } else {
+          const putDist = (arvoLow - sP) / (putBuffer || 1);
+          const callDist = (sC - arvoHigh) / (callBuffer || 1);
+          const minDist = Math.min(putDist, callDist);
+          const profitHit = minDist > 0.3;
+          if (profitHit) {
+            result = 'WIN';
+            pnl = (icCredit * 0.5) * cts * 100;
+          } else {
+            const safetyRatio = Math.max(0, minDist);
+            const timeDecay = holdFraction;
+            const estPremiumKept = icCredit * Math.min(1, safetyRatio * 0.5 + timeDecay * 0.6);
+            if (estPremiumKept >= icCredit * 0.5) {
+              result = 'WIN';
+              pnl = (icCredit * 0.5) * cts * 100;
+            } else if (estPremiumKept < icCredit * 0.2) {
+              result = 'LOSS';
+              pnl = -(icCredit * 0.3) * cts * 100;
+            } else {
+              result = 'WIN';
+              pnl = estPremiumKept * cts * 100;
+            }
+          }
+        }
+      }
     } else {
-      stopPrice = credit * 2.5;
-    }
+      // ══════════════════════════════════════════════════════════════
+      // ORIGINAL STOP MODES (premium, timegated, points, time)
+      // ══════════════════════════════════════════════════════════════
+      const putStopLevel = sP + putBuffer * proximity;
+      const callStopLevel = sC - callBuffer * proximity;
+      let putBreached = arvoLow <= putStopLevel;
+      let callBreached = arvoHigh >= callStopLevel;
 
-    const closePos = (high !== low) ? (close - low) / (high - low) : 0.5;
+      let stopPrice, earlyStopPrice, lateStopPrice, emergencyStopPrice;
+      if (stopMode === 'premium') {
+        stopPrice = credit * stopVal;
+      } else if (stopMode === 'timegated') {
+        earlyStopPrice = credit * 2;
+        lateStopPrice = credit * 1.5;
+        emergencyStopPrice = credit * 3;
+        stopPrice = lateStopPrice;
+      } else if (stopMode === 'points') {
+        stopPrice = null;
+      } else {
+        stopPrice = credit * 2.5;
+      }
 
-    let putStopped = putBreached;
-    let callStopped = callBreached;
+      const closePos = (high !== low) ? (close - low) / (high - low) : 0.5;
 
-    if (stopMode === 'timegated' && (putBreached || callBreached)) {
-      if (putBreached) {
-        if (closePos > 0.6) {
-          const putBuffer = open - sP;
-          const moveDepth = putBuffer > 0 ? (open - arvoLow) / putBuffer : 1;
-          putStopped = moveDepth > 0.85;
+      let putStopped = putBreached;
+      let callStopped = callBreached;
+
+      if (stopMode === 'timegated' && (putBreached || callBreached)) {
+        if (putBreached) {
+          if (closePos > 0.6) {
+            const pb = open - sP;
+            const moveDepth = pb > 0 ? (open - arvoLow) / pb : 1;
+            putStopped = moveDepth > 0.85;
+          }
+        }
+        if (callBreached) {
+          if (closePos < 0.4) {
+            const cb = sC - open;
+            const moveDepth = cb > 0 ? (arvoHigh - open) / cb : 1;
+            callStopped = moveDepth > 0.85;
+          }
         }
       }
-      if (callBreached) {
-        if (closePos < 0.4) {
-          const callBuffer = sC - open;
-          const moveDepth = callBuffer > 0 ? (arvoHigh - open) / callBuffer : 1;
-          callStopped = moveDepth > 0.85;
+
+      function tieredLoss(cr, c, isEarlyNoise) {
+        if (stopMode === 'timegated') {
+          const sp = isEarlyNoise ? earlyStopPrice : lateStopPrice;
+          return -(sp - cr) * c * 100;
         }
+        return -(stopPrice - cr) * c * 100;
       }
-    }
+      const putEarlyNoise = putBreached && closePos > 0.4;
+      const callEarlyNoise = callBreached && closePos < 0.6;
 
-    function tieredLoss(cr, cts, isEarlyNoise) {
-      if (stopMode === 'timegated') {
-        const sp = isEarlyNoise ? earlyStopPrice : lateStopPrice;
-        return -(sp - cr) * cts * 100;
-      }
-      return -(stopPrice - cr) * cts * 100;
-    }
-    const putEarlyNoise = putBreached && closePos > 0.4;
-    const callEarlyNoise = callBreached && closePos < 0.6;
-
-    if (strat === 'put') {
-      if (stopMode === 'points' && arvoLow <= (sP - stopVal)) {
-        result = 'LOSS';
-        pnl = -(stopVal / width) * (width - credit) * cts * 100;
-      } else if (putStopped && (stopPrice || stopMode === 'timegated')) {
-        result = 'LOSS';
-        pnl = tieredLoss(credit, cts, putEarlyNoise);
-      } else if (putBreached && !putStopped) {
-        result = 'WIN';
-        pnl = credit * profitPct * cts * 100;
-      } else {
-        result = 'WIN';
-        pnl = credit * profitPct * cts * 100;
-      }
-    } else if (strat === 'call') {
-      if (stopMode === 'points' && arvoHigh >= (sC + stopVal)) {
-        result = 'LOSS';
-        pnl = -(stopVal / width) * (width - credit) * cts * 100;
-      } else if (callStopped && (stopPrice || stopMode === 'timegated')) {
-        result = 'LOSS';
-        pnl = tieredLoss(credit, cts, callEarlyNoise);
-      } else if (callBreached && !callStopped) {
-        result = 'WIN';
-        pnl = credit * profitPct * cts * 100;
-      } else {
-        result = 'WIN';
-        pnl = credit * profitPct * cts * 100;
-      }
-    } else { // IC
-      if (stopMode === 'points' && (arvoLow <= (sP - stopVal) || arvoHigh >= (sC + stopVal))) {
-        result = 'LOSS';
-        pnl = -(stopVal / width) * (width - icCredit) * cts * 100;
-      } else if ((putStopped || callStopped) && (stopPrice || stopMode === 'timegated')) {
-        result = 'LOSS';
-        const icEarly = putStopped ? putEarlyNoise : callEarlyNoise;
-        pnl = tieredLoss(icCredit, cts, icEarly);
-      } else if ((putBreached || callBreached) && !(putStopped || callStopped)) {
-        result = 'WIN';
-        pnl = icCredit * profitPct * cts * 100;
-      } else {
-        result = 'WIN';
-        pnl = icCredit * profitPct * cts * 100;
+      if (strat === 'put') {
+        if (stopMode === 'points' && arvoLow <= (sP - stopVal)) {
+          result = 'LOSS';
+          pnl = -(stopVal / width) * (width - credit) * cts * 100;
+        } else if (putStopped && (stopPrice || stopMode === 'timegated')) {
+          result = 'LOSS';
+          pnl = tieredLoss(credit, cts, putEarlyNoise);
+        } else if (putBreached && !putStopped) {
+          result = 'WIN';
+          pnl = credit * profitPct * cts * 100;
+        } else {
+          result = 'WIN';
+          pnl = credit * profitPct * cts * 100;
+        }
+      } else if (strat === 'call') {
+        if (stopMode === 'points' && arvoHigh >= (sC + stopVal)) {
+          result = 'LOSS';
+          pnl = -(stopVal / width) * (width - credit) * cts * 100;
+        } else if (callStopped && (stopPrice || stopMode === 'timegated')) {
+          result = 'LOSS';
+          pnl = tieredLoss(credit, cts, callEarlyNoise);
+        } else if (callBreached && !callStopped) {
+          result = 'WIN';
+          pnl = credit * profitPct * cts * 100;
+        } else {
+          result = 'WIN';
+          pnl = credit * profitPct * cts * 100;
+        }
+      } else { // IC
+        if (stopMode === 'points' && (arvoLow <= (sP - stopVal) || arvoHigh >= (sC + stopVal))) {
+          result = 'LOSS';
+          pnl = -(stopVal / width) * (width - icCredit) * cts * 100;
+        } else if ((putStopped || callStopped) && (stopPrice || stopMode === 'timegated')) {
+          result = 'LOSS';
+          const icEarly = putStopped ? putEarlyNoise : callEarlyNoise;
+          pnl = tieredLoss(icCredit, cts, icEarly);
+        } else if ((putBreached || callBreached) && !(putStopped || callStopped)) {
+          result = 'WIN';
+          pnl = icCredit * profitPct * cts * 100;
+        } else {
+          result = 'WIN';
+          pnl = icCredit * profitPct * cts * 100;
+        }
       }
     }
 
