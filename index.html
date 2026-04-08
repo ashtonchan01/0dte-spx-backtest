@@ -286,6 +286,8 @@ function runBacktest() {
   const proximity = parseFloat(document.getElementById('bt-proximity').value) / 100;
   const hoursToExpiry = parseFloat(document.getElementById('bt-entryTime').value);
   const SLIPPAGE = 0.05;
+  const FEE_OPEN = 3;  // $3 per spread to open (always)
+  const FEE_CLOSE = 3; // $3 per spread to close (only if actively closed, not expired)
 
   document.getElementById('bt-dataRange').textContent = `${HIST_DATA[0][0]} to ${HIST_DATA[HIST_DATA.length-1][0]} · ${HIST_DATA.length} trading days`;
 
@@ -440,6 +442,7 @@ function runBacktest() {
     const putBuffer = open - sP;
     const callBuffer = sC - open;
     let result, pnl;
+    let activelyClosed = false; // true if stopped/closed early, false if expired
 
     if (stopMode === 'none') {
       // ══════════════════════════════════════════════════════════════
@@ -477,6 +480,7 @@ function runBacktest() {
         else { result = 'LOSS'; pnl = -netLoss * cts * 100; }
       }
     } else if (stopMode === 'strike') {
+      activelyClosed = true; // strike breach always closes (stop, profit tgt, or 3PM)
       // ══════════════════════════════════════════════════════════════
       // STRIKE BREACH MODE — Your exact decision tree:
       //   1. SPX touches short strike → close immediately (max loss)
@@ -656,10 +660,10 @@ function runBacktest() {
 
       if (strat === 'put') {
         if (stopMode === 'points' && arvoLow <= (sP - stopVal)) {
-          result = 'LOSS';
+          result = 'LOSS'; activelyClosed = true;
           pnl = -(stopVal / width) * (width - credit) * cts * 100;
         } else if (putStopped && (stopPrice || stopMode === 'timegated')) {
-          result = 'LOSS';
+          result = 'LOSS'; activelyClosed = true;
           pnl = tieredLoss(credit, cts, putEarlyNoise);
         } else if (putBreached && !putStopped) {
           result = 'WIN';
@@ -670,10 +674,10 @@ function runBacktest() {
         }
       } else if (strat === 'call') {
         if (stopMode === 'points' && arvoHigh >= (sC + stopVal)) {
-          result = 'LOSS';
+          result = 'LOSS'; activelyClosed = true;
           pnl = -(stopVal / width) * (width - credit) * cts * 100;
         } else if (callStopped && (stopPrice || stopMode === 'timegated')) {
-          result = 'LOSS';
+          result = 'LOSS'; activelyClosed = true;
           pnl = tieredLoss(credit, cts, callEarlyNoise);
         } else if (callBreached && !callStopped) {
           result = 'WIN';
@@ -684,10 +688,10 @@ function runBacktest() {
         }
       } else { // IC
         if (stopMode === 'points' && (arvoLow <= (sP - stopVal) || arvoHigh >= (sC + stopVal))) {
-          result = 'LOSS';
+          result = 'LOSS'; activelyClosed = true;
           pnl = -(stopVal / width) * (width - icCredit) * cts * 100;
         } else if ((putStopped || callStopped) && (stopPrice || stopMode === 'timegated')) {
-          result = 'LOSS';
+          result = 'LOSS'; activelyClosed = true;
           const icEarly = putStopped ? putEarlyNoise : callEarlyNoise;
           pnl = tieredLoss(icCredit, cts, icEarly);
         } else if ((putBreached || callBreached) && !(putStopped || callStopped)) {
@@ -699,6 +703,12 @@ function runBacktest() {
         }
       }
     }
+
+    // Deduct fees: $3/spread to open (always) + $3/spread to close (only if actively closed)
+    const fees = (FEE_OPEN + (activelyClosed ? FEE_CLOSE : 0)) * cts;
+    pnl -= fees;
+    // A fee could flip a tiny win into a loss
+    if (pnl < 0 && result === 'WIN') result = 'LOSS';
 
     capital += pnl;
     if (capital < 0) capital = 0;
