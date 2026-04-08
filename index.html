@@ -99,7 +99,25 @@ input, select, button, textarea { font-family: 'IBM Plex Mono', monospace; outli
     <div class="form-group">
       <label>STOP VALUE</label>
       <input type="number" id="bt-stopVal" value="2" step="0.5" min="1" style="font-size:14px;font-weight:700" disabled>
-      <div style="font-size:9px;color:var(--textDim);margin-top:2px" id="bt-stopDesc">Two-tier stop system<br><span style="color:var(--gold)">2× wide first 2hrs (noise protection)</span><br><span style="color:var(--red)">1.5× tight after 2hrs (theta decayed)</span><br><span style="color:var(--textDim)">3× emergency always active</span></div>
+      <div style="font-size:9px;color:var(--textDim);margin-top:2px" id="bt-stopDesc">Two-tier stop system</div>
+    </div>
+    <div class="form-group" id="bt-tg-group" style="display:block">
+      <label>TIME-GATE SETTINGS</label>
+      <div style="display:flex;gap:6px;align-items:center">
+        <div style="flex:1">
+          <div style="font-size:8px;color:var(--textDim);margin-bottom:2px">HOURS</div>
+          <input type="number" id="bt-tgHours" value="2" step="0.5" min="0.5" max="5" style="font-size:13px;font-weight:700;width:100%">
+        </div>
+        <div style="flex:1">
+          <div style="font-size:8px;color:var(--textDim);margin-bottom:2px">EARLY ×</div>
+          <input type="number" id="bt-tgEarly" value="2" step="0.5" min="1" max="5" style="font-size:13px;font-weight:700;width:100%">
+        </div>
+        <div style="flex:1">
+          <div style="font-size:8px;color:var(--textDim);margin-bottom:2px">LATE ×</div>
+          <input type="number" id="bt-tgLate" value="1.5" step="0.5" min="1" max="5" style="font-size:13px;font-weight:700;width:100%">
+        </div>
+      </div>
+      <div style="font-size:8px;color:var(--textDim);margin-top:3px">Early × for first N hours (noise) · Late × after (theta decayed)</div>
     </div>
     <div class="form-group">
       <label>DELTA</label>
@@ -228,10 +246,12 @@ function updateStopDesc() {
   const desc = document.getElementById('bt-stopDesc');
   const valInput = document.getElementById('bt-stopVal');
   valInput.disabled = false;
-  if (mode === 'none') { desc.innerHTML = '<span style="color:var(--cyan)">No stop loss — hold to expiry</span><br><span style="color:var(--gold)">Pure theta decay play</span><br><span style="color:var(--textDim)">Win = expire OTM, Loss = expire ITM (max loss = width - credit)</span>'; valInput.value = '0'; valInput.step = '1'; valInput.disabled = true; }
-  else if (mode === 'strike') { desc.innerHTML = '<span style="color:var(--cyan)">SPX touches short strike → close immediately</span><br><span style="color:var(--gold)">3:00 PM time stop · 50% profit target · 1.5% risk sizing</span><br><span style="color:var(--textDim)">Binary exit: thesis wrong = out. No P&L-based stop.</span>'; valInput.value = '0'; valInput.step = '1'; valInput.disabled = true; }
+  const tgGroup = document.getElementById('bt-tg-group');
+  tgGroup.style.display = mode === 'timegated' ? 'block' : 'none';
+  if (mode === 'none') { desc.innerHTML = '<span style="color:var(--cyan)">No stop loss — hold to expiry</span><br><span style="color:var(--textDim)">Win = expire OTM, Loss = expire ITM (max loss = width - credit)</span>'; valInput.value = '0'; valInput.step = '1'; valInput.disabled = true; }
+  else if (mode === 'strike') { desc.innerHTML = '<span style="color:var(--cyan)">SPX touches short strike → close immediately</span><br><span style="color:var(--gold)">3:00 PM time stop · 50% profit target · 1.5% risk sizing</span>'; valInput.value = '0'; valInput.step = '1'; valInput.disabled = true; }
   else if (mode === 'premium') { desc.innerHTML = '× credit received<br><span style="color:var(--gold)">e.g. 2× = close if spread hits 2× your credit ($1.00 → stop at $2.00)</span>'; valInput.value = '2'; valInput.step = '0.5'; }
-  else if (mode === 'timegated') { desc.innerHTML = 'Two-tier stop system<br><span style="color:var(--gold)">2× wide first 2hrs (noise protection)</span><br><span style="color:var(--red)">1.5× tight after 2hrs (theta decayed)</span><br><span style="color:var(--textDim)">3× emergency always active</span>'; valInput.value = '2'; valInput.step = '0.5'; valInput.disabled = true; }
+  else if (mode === 'timegated') { desc.innerHTML = 'Two-tier stop — configure hours cutoff and multipliers above'; valInput.value = '0'; valInput.step = '1'; valInput.disabled = true; }
   else if (mode === 'points') { desc.innerHTML = 'SPX points past short strike<br><span style="color:var(--gold)">e.g. 10 = close if SPX moves 10pts through your short strike</span>'; valInput.value = '10'; valInput.step = '5'; }
   else { desc.innerHTML = '× credit (time-weighted avg)<br><span style="color:var(--gold)">Simulates tighter stops later in session (avg 2.5× across day)</span>'; valInput.value = '2.5'; valInput.step = '0.5'; }
 }
@@ -242,6 +262,9 @@ function updateStopDesc() {
 function runBacktest() {
   const stopMode = document.getElementById('bt-stopMode').value;
   const stopVal = parseFloat(document.getElementById('bt-stopVal').value);
+  const tgHours = parseFloat(document.getElementById('bt-tgHours').value) || 2;
+  const tgEarlyMult = parseFloat(document.getElementById('bt-tgEarly').value) || 2;
+  const tgLateMult = parseFloat(document.getElementById('bt-tgLate').value) || 1.5;
   const delta = parseFloat(document.getElementById('bt-delta').value);
   const width = parseInt(document.getElementById('bt-width').value);
   const strategy = document.getElementById('bt-strategy').value;
@@ -551,9 +574,9 @@ function runBacktest() {
       if (stopMode === 'premium') {
         stopPrice = credit * stopVal;
       } else if (stopMode === 'timegated') {
-        earlyStopPrice = credit * 2;
-        lateStopPrice = credit * 1.5;
-        emergencyStopPrice = credit * 3;
+        earlyStopPrice = credit * tgEarlyMult;
+        lateStopPrice = credit * tgLateMult;
+        emergencyStopPrice = credit * (tgEarlyMult + 1);
         stopPrice = lateStopPrice;
       } else if (stopMode === 'points') {
         stopPrice = null;
@@ -566,16 +589,22 @@ function runBacktest() {
       let putStopped = putBreached;
       let callStopped = callBreached;
 
+      // earlyFrac = what fraction of the trading session the "early" window covers
+      // e.g. 2hrs / 6.5hrs = 0.31, 3hrs / 6.5hrs = 0.46
+      const earlyFrac = tgHours / 6.5;
+      // If close recovered past the early window, the breach was likely early noise
+      const recoveryThreshold = 1 - earlyFrac; // e.g. 0.69 for 2hrs, 0.54 for 3hrs
+
       if (stopMode === 'timegated' && (putBreached || callBreached)) {
         if (putBreached) {
-          if (closePos > 0.6) {
+          if (closePos > recoveryThreshold) {
             const pb = open - sP;
             const moveDepth = pb > 0 ? (open - arvoLow) / pb : 1;
             putStopped = moveDepth > 0.85;
           }
         }
         if (callBreached) {
-          if (closePos < 0.4) {
+          if (closePos < earlyFrac) {
             const cb = sC - open;
             const moveDepth = cb > 0 ? (arvoHigh - open) / cb : 1;
             callStopped = moveDepth > 0.85;
@@ -590,8 +619,9 @@ function runBacktest() {
         }
         return -(stopPrice - cr) * c * 100;
       }
-      const putEarlyNoise = putBreached && closePos > 0.4;
-      const callEarlyNoise = callBreached && closePos < 0.6;
+      // earlyNoise: breach happened but close suggests it was in the early window
+      const putEarlyNoise = putBreached && closePos > (1 - earlyFrac);
+      const callEarlyNoise = callBreached && closePos < earlyFrac;
 
       if (strat === 'put') {
         if (stopMode === 'points' && arvoLow <= (sP - stopVal)) {
