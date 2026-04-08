@@ -106,7 +106,7 @@ input, select, button, textarea { font-family: 'IBM Plex Mono', monospace; outli
       <div style="display:flex;gap:6px;align-items:center">
         <div style="flex:1">
           <div style="font-size:8px;color:var(--textDim);margin-bottom:2px">HOURS</div>
-          <input type="number" id="bt-tgHours" value="2" step="0.5" min="0.5" max="5" style="font-size:13px;font-weight:700;width:100%">
+          <input type="number" id="bt-tgHours" value="1.5" step="0.5" min="0.5" max="5" style="font-size:13px;font-weight:700;width:100%">
         </div>
         <div style="flex:1">
           <div style="font-size:8px;color:var(--textDim);margin-bottom:2px">EARLY ×</div>
@@ -114,7 +114,7 @@ input, select, button, textarea { font-family: 'IBM Plex Mono', monospace; outli
         </div>
         <div style="flex:1">
           <div style="font-size:8px;color:var(--textDim);margin-bottom:2px">LATE ×</div>
-          <input type="number" id="bt-tgLate" value="1.5" step="0.5" min="1" max="5" style="font-size:13px;font-weight:700;width:100%">
+          <input type="number" id="bt-tgLate" value="1" step="0.5" min="1" max="5" style="font-size:13px;font-weight:700;width:100%">
         </div>
       </div>
       <div style="font-size:8px;color:var(--textDim);margin-top:3px">Early × for first N hours (noise) · Late × after (theta decayed)</div>
@@ -133,8 +133,8 @@ input, select, button, textarea { font-family: 'IBM Plex Mono', monospace; outli
       <label>SPREAD WIDTH</label>
       <select id="bt-width" style="font-size:12px">
         <option value="5">5 pts</option>
-        <option value="10">10 pts</option>
-        <option value="15" selected>15 pts</option>
+        <option value="10" selected>10 pts</option>
+        <option value="15">15 pts</option>
         <option value="20">20 pts</option>
         <option value="25">25 pts</option>
       </select>
@@ -181,9 +181,9 @@ input, select, button, textarea { font-family: 'IBM Plex Mono', monospace; outli
     <div class="form-group">
       <label>ENTRY TIME (ET)</label>
       <select id="bt-entryTime" style="font-size:12px">
-        <option value="6.5">9:30 AM (open)</option>
+        <option value="6.5" selected>9:30 AM (open)</option>
         <option value="6.25">9:45 AM (+15 min)</option>
-        <option value="6.0" selected>10:00 AM (+30 min)</option>
+        <option value="6.0">10:00 AM (+30 min)</option>
         <option value="5.75">10:15 AM (+45 min)</option>
         <option value="5.5">10:30 AM (+1 hr)</option>
         <option value="5.25">10:45 AM (+1h 15)</option>
@@ -432,18 +432,38 @@ function runBacktest() {
 
     if (stopMode === 'none') {
       // ══════════════════════════════════════════════════════════════
-      // NO STOP — pure hold to expiry
-      // Win = expire OTM (keep full credit), Loss = expire ITM (max loss)
+      // NO STOP — hold to expiry with PARTIAL LOSS modeling
+      // OTM at close = keep full credit
+      // ITM at close = lose actual intrinsic value, capped at width
+      // e.g. short put 5600, SPX closes 5598 → intrinsic $2, not full width
       // ══════════════════════════════════════════════════════════════
       if (strat === 'put') {
-        result = close > sP ? 'WIN' : 'LOSS';
-        pnl = result === 'WIN' ? credit * cts * 100 : -(width - credit) * cts * 100;
+        if (close > sP) {
+          result = 'WIN';
+          pnl = credit * cts * 100;
+        } else {
+          const intrinsic = Math.min(sP - close, width);
+          const netLoss = intrinsic - credit;
+          if (netLoss <= 0) { result = 'WIN'; pnl = Math.abs(netLoss) * cts * 100; }
+          else { result = 'LOSS'; pnl = -netLoss * cts * 100; }
+        }
       } else if (strat === 'call') {
-        result = close < sC ? 'WIN' : 'LOSS';
-        pnl = result === 'WIN' ? credit * cts * 100 : -(width - credit) * cts * 100;
+        if (close < sC) {
+          result = 'WIN';
+          pnl = credit * cts * 100;
+        } else {
+          const intrinsic = Math.min(close - sC, width);
+          const netLoss = intrinsic - credit;
+          if (netLoss <= 0) { result = 'WIN'; pnl = Math.abs(netLoss) * cts * 100; }
+          else { result = 'LOSS'; pnl = -netLoss * cts * 100; }
+        }
       } else { // IC
-        result = (close > sP && close < sC) ? 'WIN' : 'LOSS';
-        pnl = result === 'WIN' ? icCredit * cts * 100 : -(width - (strat === 'ic' ? icCredit : credit)) * cts * 100;
+        const putIntrinsic = close < sP ? Math.min(sP - close, width) : 0;
+        const callIntrinsic = close > sC ? Math.min(close - sC, width) : 0;
+        const totalIntrinsic = putIntrinsic + callIntrinsic;
+        const netLoss = totalIntrinsic - icCredit;
+        if (netLoss <= 0) { result = 'WIN'; pnl = Math.abs(netLoss) * cts * 100; }
+        else { result = 'LOSS'; pnl = -netLoss * cts * 100; }
       }
     } else if (stopMode === 'strike') {
       // ══════════════════════════════════════════════════════════════
