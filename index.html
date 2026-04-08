@@ -204,8 +204,19 @@ input, select, button, textarea { font-family: 'IBM Plex Mono', monospace; outli
   </div>
 </div>
 
-<!-- RESULTS -->
+<!-- TAB BAR -->
+<div id="bt-tabs" style="display:none;margin-bottom:12px">
+  <div style="display:flex;gap:0;border-bottom:2px solid var(--border)">
+    <button class="bt-tab active" onclick="switchTab('results')" id="tab-results" style="padding:10px 24px;font-size:12px;font-weight:700;letter-spacing:2px;background:transparent;border:none;border-bottom:2px solid var(--gold);color:var(--white);cursor:pointer;font-family:'Chakra Petch',sans-serif;margin-bottom:-2px">RESULTS</button>
+    <button class="bt-tab" onclick="switchTab('log')" id="tab-log" style="padding:10px 24px;font-size:12px;font-weight:700;letter-spacing:2px;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--textDim);cursor:pointer;font-family:'Chakra Petch',sans-serif;margin-bottom:-2px">TRADE LOG</button>
+  </div>
+</div>
+
+<!-- RESULTS TAB -->
 <div id="bt-results"></div>
+
+<!-- TRADE LOG TAB -->
+<div id="bt-log-tab" style="display:none"></div>
 
 </div><!-- /container -->
 
@@ -692,7 +703,7 @@ function runBacktest() {
     capital += pnl;
     if (capital < 0) capital = 0;
 
-    trades.push({ date, strat, credit: credit.toFixed(2), cts, result, pnl: Math.round(pnl), capital: Math.round(capital), vix, dayName, bias: biasLabel, gex });
+    trades.push({ date, strat, strike: strat==='call'?sC:sP, credit: credit.toFixed(2), cts, result, pnl: Math.round(pnl), capital: Math.round(capital), vix, dayName, bias: biasLabel, gex });
     equity.push({ date, value: Math.round(capital) });
 
     if (capital > maxEquity) maxEquity = capital;
@@ -875,28 +886,46 @@ function runBacktest() {
       </div>
     </div>
 
-    <!-- TRADE LOG (last 50) -->
-    <div class="panel" style="padding:14px;max-height:400px;overflow-y:auto">
-      <div style="font-size:11px;color:var(--textDim);letter-spacing:2px;margin-bottom:10px">RECENT TRADES (last 50)</div>
-      <div style="display:grid;grid-template-columns:${strategy==='auto'?'85px 40px 55px 55px 45px 40px 85px 55px 55px 75px':'90px 50px 60px 60px 50px 50px 70px 80px'};gap:0;font-size:10px;color:var(--textDim);letter-spacing:1px;padding:4px 0;border-bottom:1px solid var(--border)">
-        <div>DATE</div><div>DAY</div><div>STRAT</div><div>CREDIT</div><div>VIX</div><div>CTS</div>${strategy==='auto'?'<div>BIAS</div><div>GEX</div>':''}<div>RESULT</div><div>P&L</div>
-      </div>
-      ${trades.slice(-50).reverse().map(t=>{
-        const gexColors = { positive:'var(--green)', neutral:'var(--cyan)', cautious:'var(--gold)', negative:'var(--red)' };
-        const gexLabels = { positive:'+GEX', neutral:'NEUT', cautious:'CAUT', negative:'-GEX' };
-        return `<div style="display:grid;grid-template-columns:${strategy==='auto'?'85px 40px 55px 55px 45px 40px 85px 55px 55px 75px':'90px 50px 60px 60px 50px 50px 70px 80px'};gap:0;padding:4px 0;border-bottom:1px solid var(--border);font-size:11px">
-          <div style="color:var(--text)">${t.date}</div>
-          <div style="color:var(--textDim)">${t.dayName}</div>
-          <div style="color:${t.strat==='put'?'var(--green)':t.strat==='call'?'var(--orange)':'var(--cyan)'}">${t.strat.toUpperCase()}</div>
-          <div style="color:var(--text)">$${t.credit}</div>
-          <div style="color:${t.vix>25?'var(--red)':t.vix>18?'var(--gold)':'var(--green)'}">${t.vix.toFixed(0)}</div>
-          <div style="color:var(--text)">${t.cts}</div>
-          ${strategy==='auto'?'<div style="font-size:9px;color:'+(t.bias.includes('BULL')?'var(--green)':t.bias.includes('BEAR')?'var(--red)':'var(--cyan)')+'">'+t.bias+'</div><div style="font-size:9px;color:'+(gexColors[t.gex]||'var(--textDim)')+'">'+( gexLabels[t.gex]||'')+'</div>':''}
-          <div style="color:${t.result==='WIN'?'var(--green)':'var(--red)'};font-weight:700">${t.result}</div>
-          <div class="mono" style="color:${t.pnl>=0?'var(--green)':'var(--red)'};font-weight:700">${t.pnl>=0?'+':''}$${t.pnl.toLocaleString()}</div>
-        </div>`;
-      }).join('')}
-    </div>`;
+    `;
+
+  // Store trades globally for CSV/log tab
+  window._btTrades = trades;
+
+  // Populate Trade Log tab
+  document.getElementById('bt-log-tab').innerHTML = '<div class="panel" style="padding:14px">' +
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">' +
+      '<div style="font-size:11px;color:var(--textDim);letter-spacing:2px">FULL TRADE LOG — ' + total + ' TRADES</div>' +
+      '<div style="display:flex;gap:8px;align-items:center">' +
+        '<span style="font-size:10px;color:var(--textDim)" id="bt-log-showing">Showing all</span>' +
+        '<select id="bt-log-filter" style="font-size:10px;padding:4px 8px;background:var(--panelAlt);border:1px solid var(--borderBright);color:var(--white)" onchange="filterTradeLog()">' +
+          '<option value="all">All trades</option><option value="loss">Losses only</option><option value="win">Wins only</option>' +
+        '</select>' +
+        '<button class="btn" style="padding:4px 12px;font-size:9px;color:var(--cyan);border-color:var(--cyan)" onclick="downloadCSV()">DOWNLOAD CSV</button>' +
+      '</div>' +
+    '</div>' +
+    '<div style="overflow-y:auto;max-height:calc(100vh - 200px)" id="bt-log-container">' +
+      '<div style="display:grid;grid-template-columns:30px 85px 38px 50px 55px 55px 42px 50px 60px 80px 90px;gap:0;font-size:9px;color:var(--textDim);letter-spacing:1px;padding:4px 0;border-bottom:2px solid var(--borderBright);position:sticky;top:0;background:var(--panel);z-index:1">' +
+        '<div>#</div><div>DATE</div><div>DAY</div><div>STRAT</div><div>STRIKE</div><div>CREDIT</div><div>VIX</div><div>CTS</div><div>RESULT</div><div>P&L</div><div>CAPITAL</div>' +
+      '</div>' +
+      trades.map((t,idx) =>
+        '<div class="bt-log-row" data-result="'+t.result+'" style="display:grid;grid-template-columns:30px 85px 38px 50px 55px 55px 42px 50px 60px 80px 90px;gap:0;padding:3px 0;border-bottom:1px solid var(--border);font-size:11px">' +
+          '<div style="color:var(--textDim);font-size:9px">'+(idx+1)+'</div>' +
+          '<div style="color:var(--text)">'+t.date+'</div>' +
+          '<div style="color:var(--textDim)">'+t.dayName+'</div>' +
+          '<div style="color:'+(t.strat==='put'?'var(--green)':t.strat==='call'?'var(--orange)':'var(--cyan)')+'">'+t.strat.toUpperCase()+'</div>' +
+          '<div style="color:var(--textMid)">'+t.strike+'</div>' +
+          '<div style="color:var(--text)">$'+t.credit+'</div>' +
+          '<div style="color:'+(t.vix>25?'var(--red)':t.vix>18?'var(--gold)':'var(--green)')+'">'+t.vix.toFixed(0)+'</div>' +
+          '<div style="color:var(--white);font-weight:600">'+t.cts+'</div>' +
+          '<div style="color:'+(t.result==='WIN'?'var(--green)':'var(--red)')+';font-weight:700">'+t.result+'</div>' +
+          '<div class="mono" style="color:'+(t.pnl>=0?'var(--green)':'var(--red)')+';font-weight:700">'+(t.pnl>=0?'+':'')+'$'+t.pnl.toLocaleString()+'</div>' +
+          '<div class="mono" style="color:var(--white);font-size:10px">$'+t.capital.toLocaleString()+'</div>' +
+        '</div>'
+      ).join('') +
+    '</div></div>';
+
+  // Show tabs
+  document.getElementById('bt-tabs').style.display = 'block';
 
   // Draw equity curve
   setTimeout(() => {
@@ -1012,6 +1041,61 @@ function runBacktest() {
       });
     }
   }, 100);
+}
+
+function switchTab(tab) {
+  const results = document.getElementById('bt-results');
+  const log = document.getElementById('bt-log-tab');
+  const tabResults = document.getElementById('tab-results');
+  const tabLog = document.getElementById('tab-log');
+  if (tab === 'results') {
+    results.style.display = 'block';
+    log.style.display = 'none';
+    tabResults.style.borderBottomColor = 'var(--gold)';
+    tabResults.style.color = 'var(--white)';
+    tabLog.style.borderBottomColor = 'transparent';
+    tabLog.style.color = 'var(--textDim)';
+  } else {
+    results.style.display = 'none';
+    log.style.display = 'block';
+    tabLog.style.borderBottomColor = 'var(--gold)';
+    tabLog.style.color = 'var(--white)';
+    tabResults.style.borderBottomColor = 'transparent';
+    tabResults.style.color = 'var(--textDim)';
+  }
+}
+
+function filterTradeLog() {
+  const filter = document.getElementById('bt-log-filter').value;
+  const rows = document.querySelectorAll('.bt-log-row');
+  let shown = 0;
+  rows.forEach(row => {
+    const result = row.getAttribute('data-result');
+    if (filter === 'all' || (filter === 'loss' && result === 'LOSS') || (filter === 'win' && result === 'WIN')) {
+      row.style.display = 'grid';
+      shown++;
+    } else {
+      row.style.display = 'none';
+    }
+  });
+  const label = document.getElementById('bt-log-showing');
+  if (label) label.textContent = filter === 'all' ? 'Showing all' : 'Showing ' + shown + ' ' + filter + 's';
+}
+
+function downloadCSV() {
+  if (!window._btTrades || !window._btTrades.length) return;
+  const header = 'Date,Day,Strategy,Strike,Credit,VIX,Contracts,Result,PnL,Capital';
+  const rows = window._btTrades.map(t =>
+    [t.date, t.dayName, t.strat.toUpperCase(), t.strike, t.credit, t.vix.toFixed(1), t.cts, t.result, t.pnl, t.capital].join(',')
+  );
+  const csv = [header, ...rows].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'spx_backtest_trades.csv';
+  a.click();
+  URL.revokeObjectURL(url);
 }
 </script>
 </body>
