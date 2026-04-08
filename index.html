@@ -618,27 +618,7 @@ function runBacktest() {
       let callStopped = callBreached;
 
       // earlyFrac = what fraction of the trading session the "early" window covers
-      // e.g. 2hrs / 6.5hrs = 0.31, 3hrs / 6.5hrs = 0.46
       const earlyFrac = tgHours / 6.5;
-      // If close recovered past the early window, the breach was likely early noise
-      const recoveryThreshold = 1 - earlyFrac; // e.g. 0.69 for 2hrs, 0.54 for 3hrs
-
-      if (stopMode === 'timegated' && (putBreached || callBreached)) {
-        if (putBreached) {
-          if (closePos > recoveryThreshold) {
-            const pb = open - sP;
-            const moveDepth = pb > 0 ? (open - arvoLow) / pb : 1;
-            putStopped = moveDepth > 0.85;
-          }
-        }
-        if (callBreached) {
-          if (closePos < earlyFrac) {
-            const cb = sC - open;
-            const moveDepth = cb > 0 ? (arvoHigh - open) / cb : 1;
-            callStopped = moveDepth > 0.85;
-          }
-        }
-      }
 
       function tieredLoss(cr, c, isEarlyNoise) {
         if (stopMode === 'timegated') {
@@ -647,7 +627,8 @@ function runBacktest() {
         }
         return -(stopPrice - cr) * c * 100;
       }
-      // earlyNoise: breach happened but close suggests it was in the early window
+      // Estimate if breach was in early or late window using closePos
+      // High closePos for puts = SPX dipped then recovered → likely morning breach
       const putEarlyNoise = putBreached && closePos > (1 - earlyFrac);
       const callEarlyNoise = callBreached && closePos < earlyFrac;
 
@@ -655,13 +636,10 @@ function runBacktest() {
         if (stopMode === 'points' && arvoLow <= (sP - stopVal)) {
           result = 'LOSS'; activelyClosed = true; reason = 'Points stop (' + stopVal + 'pts)';
           pnl = -(stopVal / width) * (width - credit) * cts * 100;
-        } else if (putStopped && (stopPrice || stopMode === 'timegated')) {
+        } else if (putBreached && (stopPrice || stopMode === 'timegated')) {
           result = 'LOSS'; activelyClosed = true;
           reason = stopMode === 'timegated' ? (putEarlyNoise ? tgEarlyMult + '× early stop' : tgLateMult + '× late stop') : stopVal + '× premium stop';
           pnl = tieredLoss(credit, cts, putEarlyNoise);
-        } else if (putBreached && !putStopped) {
-          result = 'WIN'; reason = 'Breached but recovered → expired OTM';
-          pnl = credit * profitPct * cts * 100;
         } else {
           result = 'WIN'; reason = 'Expired OTM';
           pnl = credit * profitPct * cts * 100;
@@ -670,13 +648,10 @@ function runBacktest() {
         if (stopMode === 'points' && arvoHigh >= (sC + stopVal)) {
           result = 'LOSS'; activelyClosed = true; reason = 'Points stop (' + stopVal + 'pts)';
           pnl = -(stopVal / width) * (width - credit) * cts * 100;
-        } else if (callStopped && (stopPrice || stopMode === 'timegated')) {
+        } else if (callBreached && (stopPrice || stopMode === 'timegated')) {
           result = 'LOSS'; activelyClosed = true;
           reason = stopMode === 'timegated' ? (callEarlyNoise ? tgEarlyMult + '× early stop' : tgLateMult + '× late stop') : stopVal + '× premium stop';
           pnl = tieredLoss(credit, cts, callEarlyNoise);
-        } else if (callBreached && !callStopped) {
-          result = 'WIN'; reason = 'Breached but recovered → expired OTM';
-          pnl = credit * profitPct * cts * 100;
         } else {
           result = 'WIN'; reason = 'Expired OTM';
           pnl = credit * profitPct * cts * 100;
@@ -685,14 +660,11 @@ function runBacktest() {
         if (stopMode === 'points' && (arvoLow <= (sP - stopVal) || arvoHigh >= (sC + stopVal))) {
           result = 'LOSS'; activelyClosed = true; reason = 'Points stop (' + stopVal + 'pts)';
           pnl = -(stopVal / width) * (width - icCredit) * cts * 100;
-        } else if ((putStopped || callStopped) && (stopPrice || stopMode === 'timegated')) {
+        } else if ((putBreached || callBreached) && (stopPrice || stopMode === 'timegated')) {
           result = 'LOSS'; activelyClosed = true;
-          const icEarly = putStopped ? putEarlyNoise : callEarlyNoise;
+          const icEarly = putBreached ? putEarlyNoise : callEarlyNoise;
           reason = stopMode === 'timegated' ? (icEarly ? tgEarlyMult + '× early stop' : tgLateMult + '× late stop') : stopVal + '× premium stop';
           pnl = tieredLoss(icCredit, cts, icEarly);
-        } else if ((putBreached || callBreached) && !(putStopped || callStopped)) {
-          result = 'WIN'; reason = 'Breached but recovered → expired OTM';
-          pnl = icCredit * profitPct * cts * 100;
         } else {
           result = 'WIN'; reason = 'Expired OTM';
           pnl = icCredit * profitPct * cts * 100;

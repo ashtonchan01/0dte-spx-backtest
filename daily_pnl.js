@@ -88,38 +88,28 @@ for (let i = 0; i < HIST_DATA.length; i++) {
 
   const closePos = (high !== low) ? (close - low) / (high - low) : 0.5;
   const earlyFrac = tgHours / 6.5;
-  const recoveryThreshold = 1 - earlyFrac;
 
-  let putStopped = putBreached;
-  if (putBreached) {
-    if (closePos > recoveryThreshold) {
-      const pb = open - sP;
-      const moveDepth = pb > 0 ? (open - arvoLow) / pb : 1;
-      putStopped = moveDepth > 0.85;
-    }
-  }
-
+  // Estimate if breach was early or late window
   const putEarlyNoise = putBreached && closePos > (1 - earlyFrac);
-  let result, pnl;
+  let result, pnl, reason = '';
   let activelyClosed = false;
 
-  if (putStopped) {
+  if (putBreached) {
     result = 'LOSS';
     activelyClosed = true;
     const sp = putEarlyNoise ? earlyStopPrice : lateStopPrice;
+    reason = putEarlyNoise ? tgEarlyMult + '× early stop' : tgLateMult + '× late stop';
     pnl = -(sp - credit) * cts * 100;
-  } else if (putBreached && !putStopped) {
-    result = 'WIN';
-    pnl = credit * cts * 100;
   } else {
     result = 'WIN';
+    reason = 'Expired OTM';
     pnl = credit * cts * 100;
   }
 
   // Fees: $3/spread to open (always) + $3/spread to close (only if stopped)
   const fees = (3 + (activelyClosed ? 3 : 0)) * cts;
   pnl -= fees;
-  if (pnl < 0 && result === 'WIN') result = 'LOSS';
+  if (pnl < 0 && result === 'WIN') { result = 'LOSS'; reason = 'Fees exceeded profit'; }
 
   capital += pnl;
   if (capital < 0) capital = 0;
