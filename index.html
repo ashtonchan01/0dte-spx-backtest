@@ -106,7 +106,7 @@ input, select, button, textarea { font-family: 'IBM Plex Mono', monospace; outli
       <div style="display:flex;gap:6px;align-items:center">
         <div style="flex:1">
           <div style="font-size:8px;color:var(--textDim);margin-bottom:2px">HOURS</div>
-          <input type="number" id="bt-tgHours" value="1.5" step="0.5" min="0.5" max="5" style="font-size:13px;font-weight:700;width:100%">
+          <input type="number" id="bt-tgHours" value="1" step="0.5" min="0.5" max="5" style="font-size:13px;font-weight:700;width:100%">
         </div>
         <div style="flex:1">
           <div style="font-size:8px;color:var(--textDim);margin-bottom:2px">EARLY ×</div>
@@ -123,8 +123,8 @@ input, select, button, textarea { font-family: 'IBM Plex Mono', monospace; outli
       <label>DELTA</label>
       <select id="bt-delta" style="font-size:12px">
         <option value="0.10">0.10 (Safe)</option>
-        <option value="0.12">0.12 (Morn)</option>
-        <option value="0.15" selected>0.15 (Arvo)</option>
+        <option value="0.12" selected>0.12 (Morn)</option>
+        <option value="0.15">0.15 (Arvo)</option>
         <option value="0.18">0.18 (Med)</option>
         <option value="0.20">0.20 (Aggr)</option>
       </select>
@@ -133,8 +133,8 @@ input, select, button, textarea { font-family: 'IBM Plex Mono', monospace; outli
       <label>SPREAD WIDTH</label>
       <select id="bt-width" style="font-size:12px">
         <option value="5">5 pts</option>
-        <option value="10" selected>10 pts</option>
-        <option value="15">15 pts</option>
+        <option value="10">10 pts</option>
+        <option value="15" selected>15 pts</option>
         <option value="20">20 pts</option>
         <option value="25">25 pts</option>
       </select>
@@ -181,13 +181,13 @@ input, select, button, textarea { font-family: 'IBM Plex Mono', monospace; outli
     <div class="form-group">
       <label>ENTRY TIME (ET)</label>
       <select id="bt-entryTime" style="font-size:12px">
-        <option value="6.5" selected>9:30 AM (open)</option>
+        <option value="6.5">9:30 AM (open)</option>
         <option value="6.25">9:45 AM (+15 min)</option>
         <option value="6.0">10:00 AM (+30 min)</option>
         <option value="5.75">10:15 AM (+45 min)</option>
         <option value="5.5">10:30 AM (+1 hr)</option>
         <option value="5.25">10:45 AM (+1h 15)</option>
-        <option value="5.0">11:00 AM (+1h 30)</option>
+        <option value="5.0" selected>11:00 AM (+1h 30)</option>
         <option value="4.75">11:15 AM (+1h 45)</option>
         <option value="4.5">11:30 AM (+2 hr)</option>
         <option value="4.25">11:45 AM (+2h 15)</option>
