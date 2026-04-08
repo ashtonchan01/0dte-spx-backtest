@@ -441,7 +441,7 @@ function runBacktest() {
     const arvoHigh = Math.max(close, open) + arvoRange * 0.3;
     const putBuffer = open - sP;
     const callBuffer = sC - open;
-    let result, pnl;
+    let result, pnl, reason = '';
     let activelyClosed = false; // true if stopped/closed early, false if expired
 
     if (stopMode === 'none') {
@@ -453,31 +453,31 @@ function runBacktest() {
       // ══════════════════════════════════════════════════════════════
       if (strat === 'put') {
         if (close > sP) {
-          result = 'WIN';
+          result = 'WIN'; reason = 'Expired OTM';
           pnl = credit * cts * 100;
         } else {
           const intrinsic = Math.min(sP - close, width);
           const netLoss = intrinsic - credit;
-          if (netLoss <= 0) { result = 'WIN'; pnl = Math.abs(netLoss) * cts * 100; }
-          else { result = 'LOSS'; pnl = -netLoss * cts * 100; }
+          if (netLoss <= 0) { result = 'WIN'; reason = 'Expired ITM (credit > intrinsic)'; pnl = Math.abs(netLoss) * cts * 100; }
+          else { result = 'LOSS'; reason = 'Expired ITM (' + (sP - close).toFixed(0) + 'pts deep)'; pnl = -netLoss * cts * 100; }
         }
       } else if (strat === 'call') {
         if (close < sC) {
-          result = 'WIN';
+          result = 'WIN'; reason = 'Expired OTM';
           pnl = credit * cts * 100;
         } else {
           const intrinsic = Math.min(close - sC, width);
           const netLoss = intrinsic - credit;
-          if (netLoss <= 0) { result = 'WIN'; pnl = Math.abs(netLoss) * cts * 100; }
-          else { result = 'LOSS'; pnl = -netLoss * cts * 100; }
+          if (netLoss <= 0) { result = 'WIN'; reason = 'Expired ITM (credit > intrinsic)'; pnl = Math.abs(netLoss) * cts * 100; }
+          else { result = 'LOSS'; reason = 'Expired ITM (' + (close - sC).toFixed(0) + 'pts deep)'; pnl = -netLoss * cts * 100; }
         }
       } else { // IC
         const putIntrinsic = close < sP ? Math.min(sP - close, width) : 0;
         const callIntrinsic = close > sC ? Math.min(close - sC, width) : 0;
         const totalIntrinsic = putIntrinsic + callIntrinsic;
         const netLoss = totalIntrinsic - icCredit;
-        if (netLoss <= 0) { result = 'WIN'; pnl = Math.abs(netLoss) * cts * 100; }
-        else { result = 'LOSS'; pnl = -netLoss * cts * 100; }
+        if (netLoss <= 0) { result = 'WIN'; reason = 'Expired OTM'; pnl = Math.abs(netLoss) * cts * 100; }
+        else { result = 'LOSS'; reason = 'Expired ITM'; pnl = -netLoss * cts * 100; }
       }
     } else if (stopMode === 'strike') {
       activelyClosed = true; // strike breach always closes (stop, profit tgt, or 3PM)
@@ -509,58 +509,51 @@ function runBacktest() {
 
       if (strat === 'put') {
         if (putStrikeBreach) {
-          // SPX hit our short put strike — thesis is wrong, close for max loss
-          // Loss = (width - credit) per spread (capped at max loss)
-          result = 'LOSS';
+          result = 'LOSS'; reason = 'Strike breach → closed';
           pnl = -(width - credit) * cts * 100;
         } else {
-          // SPX never reached short strike
-          // Did the 50% profit target fill? (more likely if SPX stayed far from strike)
-          const distFromStrike = (arvoLow - sP) / putBuffer; // how far lowest point stayed from strike (>0 = safe)
-          const profitHit = distFromStrike > 0.3; // stayed well away → theta decay fills the 50% target
+          const distFromStrike = (arvoLow - sP) / putBuffer;
+          const profitHit = distFromStrike > 0.3;
           if (profitHit) {
-            result = 'WIN';
+            result = 'WIN'; reason = '50% profit target';
             pnl = profitTarget * cts * 100;
           } else {
-            // 3:00 PM time stop — close at whatever mark-to-market is
-            // Estimate remaining premium: if SPX is near strike, still risky; if far, mostly decayed
             const safetyRatio = putBuffer > 0 ? Math.max(0, (arvoLow - sP)) / putBuffer : 0;
-            const timeDecay = holdFraction; // theta earned by 3PM
+            const timeDecay = holdFraction;
             const estPremiumKept = credit * Math.min(1, safetyRatio * 0.5 + timeDecay * 0.6);
             result = estPremiumKept > credit * 0.2 ? 'WIN' : 'LOSS';
-            pnl = (estPremiumKept - (credit - credit)) * cts * 100; // net = premium kept
+            pnl = (estPremiumKept - (credit - credit)) * cts * 100;
             pnl = estPremiumKept * cts * 100 - (credit - estPremiumKept < 0 ? 0 : 0);
-            // Simplified: you keep whatever theta + distance gave you by 3PM
             pnl = (estPremiumKept >= credit * 0.5 ? profitTarget : estPremiumKept) * cts * 100;
+            reason = '3PM time stop';
             if (estPremiumKept < credit * 0.2) {
-              // Very close to strike at 3PM — small loss
               pnl = -(credit * 0.3) * cts * 100;
-              result = 'LOSS';
+              result = 'LOSS'; reason = '3PM time stop (near strike)';
             }
           }
         }
       } else if (strat === 'call') {
         if (callStrikeBreach) {
-          result = 'LOSS';
+          result = 'LOSS'; reason = 'Strike breach → closed';
           pnl = -(width - credit) * cts * 100;
         } else {
           const distFromStrike = (sC - arvoHigh) / callBuffer;
           const profitHit = distFromStrike > 0.3;
           if (profitHit) {
-            result = 'WIN';
+            result = 'WIN'; reason = '50% profit target';
             pnl = profitTarget * cts * 100;
           } else {
             const safetyRatio = callBuffer > 0 ? Math.max(0, (sC - arvoHigh)) / callBuffer : 0;
             const timeDecay = holdFraction;
             const estPremiumKept = credit * Math.min(1, safetyRatio * 0.5 + timeDecay * 0.6);
             if (estPremiumKept >= credit * 0.5) {
-              result = 'WIN';
+              result = 'WIN'; reason = '3PM time stop';
               pnl = profitTarget * cts * 100;
             } else if (estPremiumKept < credit * 0.2) {
-              result = 'LOSS';
+              result = 'LOSS'; reason = '3PM time stop (near strike)';
               pnl = -(credit * 0.3) * cts * 100;
             } else {
-              result = 'WIN';
+              result = 'WIN'; reason = '3PM time stop';
               pnl = estPremiumKept * cts * 100;
             }
           }
@@ -569,7 +562,7 @@ function runBacktest() {
         const putStrike = putStrikeBreach;
         const callStrike = callStrikeBreach;
         if (putStrike || callStrike) {
-          result = 'LOSS';
+          result = 'LOSS'; reason = 'Strike breach → closed';
           pnl = -(width - icCredit) * cts * 100;
         } else {
           const putDist = (arvoLow - sP) / (putBuffer || 1);
@@ -577,20 +570,20 @@ function runBacktest() {
           const minDist = Math.min(putDist, callDist);
           const profitHit = minDist > 0.3;
           if (profitHit) {
-            result = 'WIN';
+            result = 'WIN'; reason = '50% profit target';
             pnl = (icCredit * 0.5) * cts * 100;
           } else {
             const safetyRatio = Math.max(0, minDist);
             const timeDecay = holdFraction;
             const estPremiumKept = icCredit * Math.min(1, safetyRatio * 0.5 + timeDecay * 0.6);
             if (estPremiumKept >= icCredit * 0.5) {
-              result = 'WIN';
+              result = 'WIN'; reason = '3PM time stop';
               pnl = (icCredit * 0.5) * cts * 100;
             } else if (estPremiumKept < icCredit * 0.2) {
-              result = 'LOSS';
+              result = 'LOSS'; reason = '3PM time stop (near strike)';
               pnl = -(icCredit * 0.3) * cts * 100;
             } else {
-              result = 'WIN';
+              result = 'WIN'; reason = '3PM time stop';
               pnl = estPremiumKept * cts * 100;
             }
           }
@@ -660,45 +653,48 @@ function runBacktest() {
 
       if (strat === 'put') {
         if (stopMode === 'points' && arvoLow <= (sP - stopVal)) {
-          result = 'LOSS'; activelyClosed = true;
+          result = 'LOSS'; activelyClosed = true; reason = 'Points stop (' + stopVal + 'pts)';
           pnl = -(stopVal / width) * (width - credit) * cts * 100;
         } else if (putStopped && (stopPrice || stopMode === 'timegated')) {
           result = 'LOSS'; activelyClosed = true;
+          reason = stopMode === 'timegated' ? (putEarlyNoise ? tgEarlyMult + '× early stop' : tgLateMult + '× late stop') : stopVal + '× premium stop';
           pnl = tieredLoss(credit, cts, putEarlyNoise);
         } else if (putBreached && !putStopped) {
-          result = 'WIN';
+          result = 'WIN'; reason = 'Breached but recovered → expired OTM';
           pnl = credit * profitPct * cts * 100;
         } else {
-          result = 'WIN';
+          result = 'WIN'; reason = 'Expired OTM';
           pnl = credit * profitPct * cts * 100;
         }
       } else if (strat === 'call') {
         if (stopMode === 'points' && arvoHigh >= (sC + stopVal)) {
-          result = 'LOSS'; activelyClosed = true;
+          result = 'LOSS'; activelyClosed = true; reason = 'Points stop (' + stopVal + 'pts)';
           pnl = -(stopVal / width) * (width - credit) * cts * 100;
         } else if (callStopped && (stopPrice || stopMode === 'timegated')) {
           result = 'LOSS'; activelyClosed = true;
+          reason = stopMode === 'timegated' ? (callEarlyNoise ? tgEarlyMult + '× early stop' : tgLateMult + '× late stop') : stopVal + '× premium stop';
           pnl = tieredLoss(credit, cts, callEarlyNoise);
         } else if (callBreached && !callStopped) {
-          result = 'WIN';
+          result = 'WIN'; reason = 'Breached but recovered → expired OTM';
           pnl = credit * profitPct * cts * 100;
         } else {
-          result = 'WIN';
+          result = 'WIN'; reason = 'Expired OTM';
           pnl = credit * profitPct * cts * 100;
         }
       } else { // IC
         if (stopMode === 'points' && (arvoLow <= (sP - stopVal) || arvoHigh >= (sC + stopVal))) {
-          result = 'LOSS'; activelyClosed = true;
+          result = 'LOSS'; activelyClosed = true; reason = 'Points stop (' + stopVal + 'pts)';
           pnl = -(stopVal / width) * (width - icCredit) * cts * 100;
         } else if ((putStopped || callStopped) && (stopPrice || stopMode === 'timegated')) {
           result = 'LOSS'; activelyClosed = true;
           const icEarly = putStopped ? putEarlyNoise : callEarlyNoise;
+          reason = stopMode === 'timegated' ? (icEarly ? tgEarlyMult + '× early stop' : tgLateMult + '× late stop') : stopVal + '× premium stop';
           pnl = tieredLoss(icCredit, cts, icEarly);
         } else if ((putBreached || callBreached) && !(putStopped || callStopped)) {
-          result = 'WIN';
+          result = 'WIN'; reason = 'Breached but recovered → expired OTM';
           pnl = icCredit * profitPct * cts * 100;
         } else {
-          result = 'WIN';
+          result = 'WIN'; reason = 'Expired OTM';
           pnl = icCredit * profitPct * cts * 100;
         }
       }
@@ -708,12 +704,12 @@ function runBacktest() {
     const fees = (FEE_OPEN + (activelyClosed ? FEE_CLOSE : 0)) * cts;
     pnl -= fees;
     // A fee could flip a tiny win into a loss
-    if (pnl < 0 && result === 'WIN') result = 'LOSS';
+    if (pnl < 0 && result === 'WIN') { result = 'LOSS'; reason = 'Fees exceeded profit'; }
 
     capital += pnl;
     if (capital < 0) capital = 0;
 
-    trades.push({ date, strat, strike: strat==='call'?sC:sP, credit: credit.toFixed(2), cts, result, pnl: Math.round(pnl), capital: Math.round(capital), vix, dayName, bias: biasLabel, gex });
+    trades.push({ date, strat, strike: strat==='call'?sC:sP, credit: credit.toFixed(2), cts, result, pnl: Math.round(pnl), capital: Math.round(capital), vix, dayName, bias: biasLabel, gex, reason, close: close.toFixed(2) });
     equity.push({ date, value: Math.round(capital) });
 
     if (capital > maxEquity) maxEquity = capital;
@@ -914,22 +910,24 @@ function runBacktest() {
       '</div>' +
     '</div>' +
     '<div style="overflow-y:auto;max-height:calc(100vh - 200px)" id="bt-log-container">' +
-      '<div style="display:grid;grid-template-columns:30px 85px 38px 50px 55px 55px 42px 50px 60px 80px 90px;gap:0;font-size:9px;color:var(--textDim);letter-spacing:1px;padding:4px 0;border-bottom:2px solid var(--borderBright);position:sticky;top:0;background:var(--panel);z-index:1">' +
-        '<div>#</div><div>DATE</div><div>DAY</div><div>STRAT</div><div>STRIKE</div><div>CREDIT</div><div>VIX</div><div>CTS</div><div>RESULT</div><div>P&L</div><div>CAPITAL</div>' +
+      '<div style="display:grid;grid-template-columns:30px 85px 38px 50px 55px 55px 55px 42px 50px 60px 80px 90px 1fr;gap:0;font-size:9px;color:var(--textDim);letter-spacing:1px;padding:4px 0;border-bottom:2px solid var(--borderBright);position:sticky;top:0;background:var(--panel);z-index:1">' +
+        '<div>#</div><div>DATE</div><div>DAY</div><div>STRAT</div><div>STRIKE</div><div>CREDIT</div><div>CLOSE</div><div>VIX</div><div>CTS</div><div>RESULT</div><div>P&L</div><div>CAPITAL</div><div>REASON</div>' +
       '</div>' +
       trades.map((t,idx) =>
-        '<div class="bt-log-row" data-result="'+t.result+'" style="display:grid;grid-template-columns:30px 85px 38px 50px 55px 55px 42px 50px 60px 80px 90px;gap:0;padding:3px 0;border-bottom:1px solid var(--border);font-size:11px">' +
+        '<div class="bt-log-row" data-result="'+t.result+'" style="display:grid;grid-template-columns:30px 85px 38px 50px 55px 55px 55px 42px 50px 60px 80px 90px 1fr;gap:0;padding:3px 0;border-bottom:1px solid var(--border);font-size:11px">' +
           '<div style="color:var(--textDim);font-size:9px">'+(idx+1)+'</div>' +
           '<div style="color:var(--text)">'+t.date+'</div>' +
           '<div style="color:var(--textDim)">'+t.dayName+'</div>' +
           '<div style="color:'+(t.strat==='put'?'var(--green)':t.strat==='call'?'var(--orange)':'var(--cyan)')+'">'+t.strat.toUpperCase()+'</div>' +
           '<div style="color:var(--textMid)">'+t.strike+'</div>' +
           '<div style="color:var(--text)">$'+t.credit+'</div>' +
+          '<div style="color:var(--textMid)">'+t.close+'</div>' +
           '<div style="color:'+(t.vix>25?'var(--red)':t.vix>18?'var(--gold)':'var(--green)')+'">'+t.vix.toFixed(0)+'</div>' +
           '<div style="color:var(--white);font-weight:600">'+t.cts+'</div>' +
           '<div style="color:'+(t.result==='WIN'?'var(--green)':'var(--red)')+';font-weight:700">'+t.result+'</div>' +
           '<div class="mono" style="color:'+(t.pnl>=0?'var(--green)':'var(--red)')+';font-weight:700">'+(t.pnl>=0?'+':'')+'$'+t.pnl.toLocaleString()+'</div>' +
           '<div class="mono" style="color:var(--white);font-size:10px">$'+t.capital.toLocaleString()+'</div>' +
+          '<div style="color:'+(t.result==='WIN'?'var(--green)':'var(--red)')+';font-size:9px">'+t.reason+'</div>' +
         '</div>'
       ).join('') +
     '</div></div>';
@@ -1094,9 +1092,9 @@ function filterTradeLog() {
 
 function downloadCSV() {
   if (!window._btTrades || !window._btTrades.length) return;
-  const header = 'Date,Day,Strategy,Strike,Credit,VIX,Contracts,Result,PnL,Capital';
+  const header = 'Date,Day,Strategy,Strike,Credit,Close,VIX,Contracts,Result,PnL,Capital,Reason';
   const rows = window._btTrades.map(t =>
-    [t.date, t.dayName, t.strat.toUpperCase(), t.strike, t.credit, t.vix.toFixed(1), t.cts, t.result, t.pnl, t.capital].join(',')
+    [t.date, t.dayName, t.strat.toUpperCase(), t.strike, t.credit, t.close, t.vix.toFixed(1), t.cts, t.result, t.pnl, t.capital, '"'+t.reason+'"'].join(',')
   );
   const csv = [header, ...rows].join('\n');
   const blob = new Blob([csv], { type: 'text/csv' });
