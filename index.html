@@ -222,6 +222,7 @@ input, select, button, textarea { font-family: 'IBM Plex Mono', monospace; outli
 </div><!-- /container -->
 
 <script src="hist_data.js"></script>
+<script src="spx_5min.js"></script>
 <script>
 // ── BSM MATH ──
 function normCDF(x) {
@@ -268,8 +269,18 @@ function updateStopDesc() {
   else { desc.innerHTML = '× credit (time-weighted avg)<br><span style="color:var(--gold)">Simulates tighter stops later in session (avg 2.5× across day)</span>'; valInput.value = '2.5'; valInput.step = '0.5'; }
 }
 
+// ── minuteToET helper ──
+function minuteToET(min) {
+  const totalMin = min + 570; // 570 = 9:30 AM in minutes from midnight
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const h12 = h > 12 ? h - 12 : h;
+  return h12 + ':' + String(m).padStart(2, '0') + ' ' + ampm;
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
-// BACKTEST ENGINE
+// BACKTEST ENGINE — 5-MIN BAR WALK
 // ══════════════════════════════════════════════════════════════════════════════
 function runBacktest() {
   const stopMode = document.getElementById('bt-stopMode').value;
@@ -287,10 +298,16 @@ function runBacktest() {
   const proximity = parseFloat(document.getElementById('bt-proximity').value) / 100;
   const hoursToExpiry = parseFloat(document.getElementById('bt-entryTime').value);
   const SLIPPAGE = 0.05;
-  const FEE_OPEN = 3;  // $3 per spread to open (always)
-  const FEE_CLOSE = 3; // $3 per spread to close (only if actively closed, not expired)
+  const FEE_OPEN = 3;
+  const FEE_CLOSE = 3;
 
-  document.getElementById('bt-dataRange').textContent = `${HIST_DATA[0][0]} to ${HIST_DATA[HIST_DATA.length-1][0]} · ${HIST_DATA.length} trading days`;
+  // Convert to minute-based entry
+  const entryMinute = Math.round((6.5 - hoursToExpiry) * 60);
+  const tgMinutes = tgHours * 60;
+
+  // Count days with 5-min data
+  const days5min = Object.keys(BARS_5MIN).length;
+  document.getElementById('bt-dataRange').textContent = `${HIST_DATA[0][0]} to ${HIST_DATA[HIST_DATA.length-1][0]} · ${HIST_DATA.length} daily · ${days5min} with 5-min bars`;
 
   // ── Pre-calculate rolling indicators ──
   const closes = HIST_DATA.map(d => d[4]);
@@ -342,8 +359,18 @@ function runBacktest() {
     const dayName = dayNames[dow];
     if (dow === 0 || dow === 6) continue;
 
+    // Skip if no 5-min data for this day
+    const dayBars = BARS_5MIN[date];
+    if (!dayBars || dayBars.length === 0) continue;
+
+    // Find entry bar
+    const entryBar = dayBars.find(b => b[0] >= entryMinute);
+    if (!entryBar) continue;
+    const entryPrice = entryBar[1]; // bar open price
+
     const iv = vix / 100;
-    const T = (hoursToExpiry / 24) / 365;
+    const hte = (390 - entryBar[0]) / 60; // hours to expiry from actual entry bar
+    const T = (hte / 24) / 365;
     const r = 0.045;
 
     // ── Determine strategy ──
@@ -397,9 +424,8 @@ function runBacktest() {
     const marginPerCt = (width - estCredit) * 100;
     let cts;
     if (stopMode === 'strike') {
-      // 1.5% account risk sizing: max loss per trade = 1.5% of capital
       const maxRisk = capital * 0.015;
-      const maxLossPerCt = (width - estCredit) * 100; // max loss per spread
+      const maxLossPerCt = (width - estCredit) * 100;
       cts = Math.max(1, Math.floor(maxRisk / maxLossPerCt));
     } else if (contractMode === 'phase') {
       const ph = getPhaseForCap(capital);
@@ -418,13 +444,13 @@ function runBacktest() {
       if (gex === 'negative') cts = 1;
     }
 
-    // Find strikes
-    const sP = findStrike(open, iv, T, delta, 'put'), lP = sP - width;
-    const sC = findStrike(open, iv, T, delta, 'call'), lC = sC + width;
+    // Find strikes using entryPrice
+    const sP = findStrike(entryPrice, iv, T, delta, 'put'), lP = sP - width;
+    const sC = findStrike(entryPrice, iv, T, delta, 'call'), lC = sC + width;
 
-    // Calculate credits
-    const putCredit = Math.max(bsm(open,sP,T,r,iv,'put').price - bsm(open,lP,T,r,iv,'put').price - SLIPPAGE, 0);
-    const callCredit = Math.max(bsm(open,sC,T,r,iv,'call').price - bsm(open,lC,T,r,iv,'call').price - SLIPPAGE, 0);
+    // Calculate credits using entryPrice
+    const putCredit = Math.max(bsm(entryPrice,sP,T,r,iv,'put').price - bsm(entryPrice,lP,T,r,iv,'put').price - SLIPPAGE, 0);
+    const callCredit = Math.max(bsm(entryPrice,sC,T,r,iv,'call').price - bsm(entryPrice,lC,T,r,iv,'call').price - SLIPPAGE, 0);
     const icCredit = putCredit + callCredit;
 
     let credit;
@@ -434,255 +460,213 @@ function runBacktest() {
 
     if (!(credit >= minCredit)) continue;
 
-    // ── Breach detection ──
-    const dailyRange = high - low;
-    const arvoFraction = hoursToExpiry / 6.5;
-    const arvoRange = dailyRange * arvoFraction;
-    const arvoLow = Math.min(close, open) - arvoRange * 0.3;
-    const arvoHigh = Math.max(close, open) + arvoRange * 0.3;
-    const putBuffer = open - sP;
-    const callBuffer = sC - open;
+    // ── Stop detection — walk 5-min bars ──
+    const putBuffer = entryPrice - sP;
+    const callBuffer = sC - entryPrice;
     let result, pnl, reason = '';
-    let activelyClosed = false; // true if stopped/closed early, false if expired
+    let activelyClosed = false;
+    let stopTimeStr = '';
 
     if (stopMode === 'none') {
       // ══════════════════════════════════════════════════════════════
       // NO STOP — hold to expiry with PARTIAL LOSS modeling
-      // OTM at close = keep full credit
-      // ITM at close = lose actual intrinsic value, capped at width
-      // e.g. short put 5600, SPX closes 5598 → intrinsic $2, not full width
+      // Uses real close from last 5-min bar
       // ══════════════════════════════════════════════════════════════
+      const lastBar = dayBars[dayBars.length - 1];
+      const dayClose = lastBar[4];
+
       if (strat === 'put') {
-        if (close > sP) {
+        if (dayClose > sP) {
           result = 'WIN'; reason = 'Expired OTM';
           pnl = credit * cts * 100;
         } else {
-          const intrinsic = Math.min(sP - close, width);
+          const intrinsic = Math.min(sP - dayClose, width);
           const netLoss = intrinsic - credit;
           if (netLoss <= 0) { result = 'WIN'; reason = 'Expired ITM (credit > intrinsic)'; pnl = Math.abs(netLoss) * cts * 100; }
-          else { result = 'LOSS'; reason = 'Expired ITM (' + (sP - close).toFixed(0) + 'pts deep)'; pnl = -netLoss * cts * 100; }
+          else { result = 'LOSS'; reason = 'Expired ITM (' + (sP - dayClose).toFixed(0) + 'pts deep)'; pnl = -netLoss * cts * 100; }
         }
       } else if (strat === 'call') {
-        if (close < sC) {
+        if (dayClose < sC) {
           result = 'WIN'; reason = 'Expired OTM';
           pnl = credit * cts * 100;
         } else {
-          const intrinsic = Math.min(close - sC, width);
+          const intrinsic = Math.min(dayClose - sC, width);
           const netLoss = intrinsic - credit;
           if (netLoss <= 0) { result = 'WIN'; reason = 'Expired ITM (credit > intrinsic)'; pnl = Math.abs(netLoss) * cts * 100; }
-          else { result = 'LOSS'; reason = 'Expired ITM (' + (close - sC).toFixed(0) + 'pts deep)'; pnl = -netLoss * cts * 100; }
+          else { result = 'LOSS'; reason = 'Expired ITM (' + (dayClose - sC).toFixed(0) + 'pts deep)'; pnl = -netLoss * cts * 100; }
         }
       } else { // IC
-        const putIntrinsic = close < sP ? Math.min(sP - close, width) : 0;
-        const callIntrinsic = close > sC ? Math.min(close - sC, width) : 0;
+        const putIntrinsic = dayClose < sP ? Math.min(sP - dayClose, width) : 0;
+        const callIntrinsic = dayClose > sC ? Math.min(dayClose - sC, width) : 0;
         const totalIntrinsic = putIntrinsic + callIntrinsic;
         const netLoss = totalIntrinsic - icCredit;
         if (netLoss <= 0) { result = 'WIN'; reason = 'Expired OTM'; pnl = Math.abs(netLoss) * cts * 100; }
         else { result = 'LOSS'; reason = 'Expired ITM'; pnl = -netLoss * cts * 100; }
       }
+
     } else if (stopMode === 'strike') {
-      activelyClosed = true; // strike breach always closes (stop, profit tgt, or 3PM)
       // ══════════════════════════════════════════════════════════════
-      // STRIKE BREACH MODE — Your exact decision tree:
-      //   1. SPX touches short strike → close immediately (max loss)
-      //   2. 50% profit target hit → close automatically
-      //   3. 3:00 PM time stop → close whatever remains
-      //   4. Size so max loss = 1.5% of account (handled above)
+      // STRIKE BREACH — walk bars, check if price touches short strike
       // ══════════════════════════════════════════════════════════════
+      activelyClosed = true;
+      let breached = false;
 
-      // Did SPX reach the short strike at any point during the session?
-      // We estimate intraday extremes from OHLC data
-      const putStrikeBreach = low <= sP;       // SPX dropped to/below put short strike
-      const callStrikeBreach = high >= sC;     // SPX rose to/above call short strike
+      for (let j = 0; j < dayBars.length; j++) {
+        const bar = dayBars[j];
+        if (bar[0] < entryBar[0]) continue;
 
-      // Time stop: close at 3:00 PM = 1hr before 4PM close
-      // After entry, the remaining session is hoursToExpiry hours
-      // 3:00 PM stop means we only hold for (hoursToExpiry - 1.0) hours out of hoursToExpiry
-      // If entry is after 3PM (hoursToExpiry <= 1.0), time stop = immediate close at entry
-      const holdFraction = hoursToExpiry > 1.0 ? (hoursToExpiry - 1.0) / hoursToExpiry : 0;
-
-      // Estimate if the breach happened before or after our time stop
-      // closePos: where close sits in the day's range (0=low, 1=high)
-      const closePos = (high !== low) ? (close - low) / (high - low) : 0.5;
-
-      // 50% profit target: credit × 0.5 kept = half the credit
-      const profitTarget = credit * 0.5;
-
-      if (strat === 'put') {
-        if (putStrikeBreach) {
-          result = 'LOSS'; reason = 'Strike breach → closed';
-          pnl = -(width - credit) * cts * 100;
-        } else {
-          const distFromStrike = (arvoLow - sP) / putBuffer;
-          const profitHit = distFromStrike > 0.3;
-          if (profitHit) {
-            result = 'WIN'; reason = '50% profit target';
-            pnl = profitTarget * cts * 100;
-          } else {
-            const safetyRatio = putBuffer > 0 ? Math.max(0, (arvoLow - sP)) / putBuffer : 0;
-            const timeDecay = holdFraction;
-            const estPremiumKept = credit * Math.min(1, safetyRatio * 0.5 + timeDecay * 0.6);
-            result = estPremiumKept > credit * 0.2 ? 'WIN' : 'LOSS';
-            pnl = (estPremiumKept - (credit - credit)) * cts * 100;
-            pnl = estPremiumKept * cts * 100 - (credit - estPremiumKept < 0 ? 0 : 0);
-            pnl = (estPremiumKept >= credit * 0.5 ? profitTarget : estPremiumKept) * cts * 100;
-            reason = '3PM time stop';
-            if (estPremiumKept < credit * 0.2) {
-              pnl = -(credit * 0.3) * cts * 100;
-              result = 'LOSS'; reason = '3PM time stop (near strike)';
-            }
-          }
+        if (strat === 'put' && bar[3] <= sP) {
+          breached = true;
+          stopTimeStr = minuteToET(bar[0]);
+          break;
         }
-      } else if (strat === 'call') {
-        if (callStrikeBreach) {
-          result = 'LOSS'; reason = 'Strike breach → closed';
-          pnl = -(width - credit) * cts * 100;
-        } else {
-          const distFromStrike = (sC - arvoHigh) / callBuffer;
-          const profitHit = distFromStrike > 0.3;
-          if (profitHit) {
-            result = 'WIN'; reason = '50% profit target';
-            pnl = profitTarget * cts * 100;
-          } else {
-            const safetyRatio = callBuffer > 0 ? Math.max(0, (sC - arvoHigh)) / callBuffer : 0;
-            const timeDecay = holdFraction;
-            const estPremiumKept = credit * Math.min(1, safetyRatio * 0.5 + timeDecay * 0.6);
-            if (estPremiumKept >= credit * 0.5) {
-              result = 'WIN'; reason = '3PM time stop';
-              pnl = profitTarget * cts * 100;
-            } else if (estPremiumKept < credit * 0.2) {
-              result = 'LOSS'; reason = '3PM time stop (near strike)';
-              pnl = -(credit * 0.3) * cts * 100;
-            } else {
-              result = 'WIN'; reason = '3PM time stop';
-              pnl = estPremiumKept * cts * 100;
-            }
-          }
+        if (strat === 'call' && bar[2] >= sC) {
+          breached = true;
+          stopTimeStr = minuteToET(bar[0]);
+          break;
         }
-      } else { // IC
-        const putStrike = putStrikeBreach;
-        const callStrike = callStrikeBreach;
-        if (putStrike || callStrike) {
-          result = 'LOSS'; reason = 'Strike breach → closed';
-          pnl = -(width - icCredit) * cts * 100;
+        if (strat === 'ic' && (bar[3] <= sP || bar[2] >= sC)) {
+          breached = true;
+          stopTimeStr = minuteToET(bar[0]);
+          break;
+        }
+      }
+
+      if (breached) {
+        result = 'LOSS'; reason = 'Strike breach → closed';
+        pnl = -(width - credit) * cts * 100;
+      } else {
+        // No breach — check profit target (50%) and 3PM time stop
+        const profitTarget = credit * 0.5;
+        const lastBar = dayBars[dayBars.length - 1];
+        const dayClose = lastBar[4];
+
+        // Estimate: if expired OTM, full credit kept; check profit target
+        if (strat === 'put' && dayClose > sP) {
+          result = 'WIN'; reason = '50% profit target';
+          pnl = profitTarget * cts * 100;
+        } else if (strat === 'call' && dayClose < sC) {
+          result = 'WIN'; reason = '50% profit target';
+          pnl = profitTarget * cts * 100;
+        } else if (strat === 'ic' && dayClose > sP && dayClose < sC) {
+          result = 'WIN'; reason = '50% profit target';
+          pnl = (icCredit * 0.5) * cts * 100;
         } else {
-          const putDist = (arvoLow - sP) / (putBuffer || 1);
-          const callDist = (sC - arvoHigh) / (callBuffer || 1);
-          const minDist = Math.min(putDist, callDist);
-          const profitHit = minDist > 0.3;
-          if (profitHit) {
-            result = 'WIN'; reason = '50% profit target';
-            pnl = (icCredit * 0.5) * cts * 100;
+          // Close at 3PM time stop — estimate remaining premium
+          const holdFraction = hoursToExpiry > 1.0 ? (hoursToExpiry - 1.0) / hoursToExpiry : 0;
+          const safetyRatio = strat === 'put' ? Math.max(0, (dayClose - sP) / (putBuffer || 1)) :
+                              strat === 'call' ? Math.max(0, (sC - dayClose) / (callBuffer || 1)) :
+                              Math.max(0, Math.min((dayClose - sP) / (putBuffer || 1), (sC - dayClose) / (callBuffer || 1)));
+          const estPremiumKept = credit * Math.min(1, safetyRatio * 0.5 + holdFraction * 0.6);
+          if (estPremiumKept >= credit * 0.5) {
+            result = 'WIN'; reason = '3PM time stop';
+            pnl = (credit * 0.5) * cts * 100;
+          } else if (estPremiumKept < credit * 0.2) {
+            result = 'LOSS'; reason = '3PM time stop (near strike)';
+            pnl = -(credit * 0.3) * cts * 100;
           } else {
-            const safetyRatio = Math.max(0, minDist);
-            const timeDecay = holdFraction;
-            const estPremiumKept = icCredit * Math.min(1, safetyRatio * 0.5 + timeDecay * 0.6);
-            if (estPremiumKept >= icCredit * 0.5) {
-              result = 'WIN'; reason = '3PM time stop';
-              pnl = (icCredit * 0.5) * cts * 100;
-            } else if (estPremiumKept < icCredit * 0.2) {
-              result = 'LOSS'; reason = '3PM time stop (near strike)';
-              pnl = -(icCredit * 0.3) * cts * 100;
-            } else {
-              result = 'WIN'; reason = '3PM time stop';
-              pnl = estPremiumKept * cts * 100;
-            }
+            result = 'WIN'; reason = '3PM time stop';
+            pnl = estPremiumKept * cts * 100;
           }
         }
       }
+
     } else {
       // ══════════════════════════════════════════════════════════════
-      // ORIGINAL STOP MODES (premium, timegated, points, time)
+      // PREMIUM / TIMEGATED / POINTS / TIME — walk 5-min bars
       // ══════════════════════════════════════════════════════════════
       const putStopLevel = sP + putBuffer * proximity;
       const callStopLevel = sC - callBuffer * proximity;
-      let putBreached = arvoLow <= putStopLevel;
-      let callBreached = arvoHigh >= callStopLevel;
 
-      let stopPrice, earlyStopPrice, lateStopPrice, emergencyStopPrice;
+      let stopPrice, earlyStopPrice, lateStopPrice;
       if (stopMode === 'premium') {
         stopPrice = credit * stopVal;
       } else if (stopMode === 'timegated') {
         earlyStopPrice = credit * tgEarlyMult;
         lateStopPrice = credit * tgLateMult;
-        emergencyStopPrice = credit * (tgEarlyMult + 1);
         stopPrice = lateStopPrice;
       } else if (stopMode === 'points') {
         stopPrice = null;
-      } else {
+      } else { // time
         stopPrice = credit * 2.5;
       }
 
-      const closePos = (high !== low) ? (close - low) / (high - low) : 0.5;
+      let stopped = false;
 
-      let putStopped = putBreached;
-      let callStopped = callBreached;
+      for (let j = 0; j < dayBars.length; j++) {
+        const bar = dayBars[j];
+        if (bar[0] < entryBar[0]) continue;
+        const minSinceEntry = bar[0] - entryBar[0];
 
-      // earlyFrac = what fraction of the trading session the "early" window covers
-      const earlyFrac = tgHours / 6.5;
+        // Check proximity breach
+        let breached = false;
+        if (strat === 'put' && bar[3] <= putStopLevel) breached = true;
+        if (strat === 'call' && bar[2] >= callStopLevel) breached = true;
+        if (strat === 'ic' && (bar[3] <= putStopLevel || bar[2] >= callStopLevel)) breached = true;
 
-      function tieredLoss(cr, c, isEarlyNoise) {
-        if (stopMode === 'timegated') {
-          const sp = isEarlyNoise ? earlyStopPrice : lateStopPrice;
-          return -(sp - cr) * c * 100;
+        // Points mode: check if SPX moved past strike by stopVal points
+        if (stopMode === 'points') {
+          let pointsBreach = false;
+          if ((strat === 'put' || strat === 'ic') && bar[3] <= (sP - stopVal)) pointsBreach = true;
+          if ((strat === 'call' || strat === 'ic') && bar[2] >= (sC + stopVal)) pointsBreach = true;
+          if (pointsBreach) {
+            stopped = true; activelyClosed = true;
+            reason = 'Points stop (' + stopVal + 'pts) at +' + minSinceEntry + 'min';
+            stopTimeStr = minuteToET(bar[0]);
+            pnl = -(stopVal / width) * (width - credit) * cts * 100;
+            result = 'LOSS';
+            break;
+          }
         }
-        return -(stopPrice - cr) * c * 100;
+
+        if (breached && stopMode !== 'points') {
+          if (stopMode === 'timegated') {
+            const isEarly = minSinceEntry < tgMinutes;
+            const sp = isEarly ? earlyStopPrice : lateStopPrice;
+            stopped = true; activelyClosed = true;
+            reason = (isEarly ? tgEarlyMult + '× early stop' : tgLateMult + '× late stop') + ' at +' + minSinceEntry + 'min';
+            stopTimeStr = minuteToET(bar[0]);
+            pnl = -(sp - credit) * cts * 100;
+            result = 'LOSS';
+            break;
+          } else if (stopMode === 'premium') {
+            stopped = true; activelyClosed = true;
+            reason = stopVal + '× premium stop at +' + minSinceEntry + 'min';
+            stopTimeStr = minuteToET(bar[0]);
+            pnl = -(stopPrice - credit) * cts * 100;
+            result = 'LOSS';
+            break;
+          } else { // time mode
+            stopped = true; activelyClosed = true;
+            reason = 'Time-based stop at +' + minSinceEntry + 'min';
+            stopTimeStr = minuteToET(bar[0]);
+            pnl = -(stopPrice - credit) * cts * 100;
+            result = 'LOSS';
+            break;
+          }
+        }
       }
-      // Estimate if breach was in early or late window using closePos
-      // High closePos for puts = SPX dipped then recovered → likely morning breach
-      const putEarlyNoise = putBreached && closePos > (1 - earlyFrac);
-      const callEarlyNoise = callBreached && closePos < earlyFrac;
 
-      if (strat === 'put') {
-        if (stopMode === 'points' && arvoLow <= (sP - stopVal)) {
-          result = 'LOSS'; activelyClosed = true; reason = 'Points stop (' + stopVal + 'pts)';
-          pnl = -(stopVal / width) * (width - credit) * cts * 100;
-        } else if (putBreached && (stopPrice || stopMode === 'timegated')) {
-          result = 'LOSS'; activelyClosed = true;
-          reason = stopMode === 'timegated' ? (putEarlyNoise ? tgEarlyMult + '× early stop' : tgLateMult + '× late stop') : stopVal + '× premium stop';
-          pnl = tieredLoss(credit, cts, putEarlyNoise);
-        } else {
-          result = 'WIN'; reason = 'Expired OTM';
-          pnl = credit * profitPct * cts * 100;
-        }
-      } else if (strat === 'call') {
-        if (stopMode === 'points' && arvoHigh >= (sC + stopVal)) {
-          result = 'LOSS'; activelyClosed = true; reason = 'Points stop (' + stopVal + 'pts)';
-          pnl = -(stopVal / width) * (width - credit) * cts * 100;
-        } else if (callBreached && (stopPrice || stopMode === 'timegated')) {
-          result = 'LOSS'; activelyClosed = true;
-          reason = stopMode === 'timegated' ? (callEarlyNoise ? tgEarlyMult + '× early stop' : tgLateMult + '× late stop') : stopVal + '× premium stop';
-          pnl = tieredLoss(credit, cts, callEarlyNoise);
-        } else {
-          result = 'WIN'; reason = 'Expired OTM';
-          pnl = credit * profitPct * cts * 100;
-        }
-      } else { // IC
-        if (stopMode === 'points' && (arvoLow <= (sP - stopVal) || arvoHigh >= (sC + stopVal))) {
-          result = 'LOSS'; activelyClosed = true; reason = 'Points stop (' + stopVal + 'pts)';
-          pnl = -(stopVal / width) * (width - icCredit) * cts * 100;
-        } else if ((putBreached || callBreached) && (stopPrice || stopMode === 'timegated')) {
-          result = 'LOSS'; activelyClosed = true;
-          const icEarly = putBreached ? putEarlyNoise : callEarlyNoise;
-          reason = stopMode === 'timegated' ? (icEarly ? tgEarlyMult + '× early stop' : tgLateMult + '× late stop') : stopVal + '× premium stop';
-          pnl = tieredLoss(icCredit, cts, icEarly);
-        } else {
-          result = 'WIN'; reason = 'Expired OTM';
-          pnl = icCredit * profitPct * cts * 100;
-        }
+      if (!stopped) {
+        result = 'WIN'; reason = 'Expired OTM';
+        pnl = credit * profitPct * cts * 100;
       }
     }
 
-    // Deduct fees: $3/spread to open (always) + $3/spread to close (only if actively closed)
+    // Deduct fees
     const fees = (FEE_OPEN + (activelyClosed ? FEE_CLOSE : 0)) * cts;
     pnl -= fees;
-    // A fee could flip a tiny win into a loss
     if (pnl < 0 && result === 'WIN') { result = 'LOSS'; reason = 'Fees exceeded profit'; }
 
     capital += pnl;
     if (capital < 0) capital = 0;
 
-    trades.push({ date, strat, strike: strat==='call'?sC:sP, credit: credit.toFixed(2), cts, result, pnl: Math.round(pnl), capital: Math.round(capital), vix, dayName, bias: biasLabel, gex, reason, close: close.toFixed(2) });
+    trades.push({
+      date, strat, strike: strat==='call'?sC:sP, credit: credit.toFixed(2), cts, result,
+      pnl: Math.round(pnl), capital: Math.round(capital), vix, dayName,
+      bias: biasLabel, gex, reason, close: close.toFixed(2),
+      entryPrice: entryPrice.toFixed(2), stopTime: stopTimeStr
+    });
     equity.push({ date, value: Math.round(capital) });
 
     if (capital > maxEquity) maxEquity = capital;
@@ -819,7 +803,7 @@ function runBacktest() {
       </div>
       <!-- GEX PROXY STATS -->
       <div class="panel" style="padding:14px">
-        <div style="font-size:11px;color:var(--textDim);letter-spacing:2px;margin-bottom:10px">⚡ MARKET MECHANICS (GEX PROXY)</div>
+        <div style="font-size:11px;color:var(--textDim);letter-spacing:2px;margin-bottom:10px">MARKET MECHANICS (GEX PROXY)</div>
         ${Object.entries(gexStats).map(([gex,s])=>{
           const t=s.w+s.l; const wr=t>0?(s.w/t*100).toFixed(0):'–';
           const c = parseInt(wr)>=80?'var(--green)':parseInt(wr)>=65?'var(--gold)':'var(--red)';
@@ -883,15 +867,16 @@ function runBacktest() {
       '</div>' +
     '</div>' +
     '<div style="overflow-y:auto;max-height:calc(100vh - 200px)" id="bt-log-container">' +
-      '<div style="display:grid;grid-template-columns:30px 85px 38px 50px 55px 55px 55px 42px 50px 60px 80px 90px 1fr;gap:0;font-size:9px;color:var(--textDim);letter-spacing:1px;padding:4px 0;border-bottom:2px solid var(--borderBright);position:sticky;top:0;background:var(--panel);z-index:1">' +
-        '<div>#</div><div>DATE</div><div>DAY</div><div>STRAT</div><div>STRIKE</div><div>CREDIT</div><div>CLOSE</div><div>VIX</div><div>CTS</div><div>RESULT</div><div>P&L</div><div>CAPITAL</div><div>REASON</div>' +
+      '<div style="display:grid;grid-template-columns:30px 85px 38px 50px 60px 55px 55px 55px 42px 50px 60px 80px 90px 60px 1fr;gap:0;font-size:9px;color:var(--textDim);letter-spacing:1px;padding:4px 0;border-bottom:2px solid var(--borderBright);position:sticky;top:0;background:var(--panel);z-index:1">' +
+        '<div>#</div><div>DATE</div><div>DAY</div><div>STRAT</div><div>ENTRY</div><div>STRIKE</div><div>CREDIT</div><div>CLOSE</div><div>VIX</div><div>CTS</div><div>RESULT</div><div>P&L</div><div>CAPITAL</div><div>STOP TIME</div><div>REASON</div>' +
       '</div>' +
       trades.map((t,idx) =>
-        '<div class="bt-log-row" data-result="'+t.result+'" style="display:grid;grid-template-columns:30px 85px 38px 50px 55px 55px 55px 42px 50px 60px 80px 90px 1fr;gap:0;padding:3px 0;border-bottom:1px solid var(--border);font-size:11px">' +
+        '<div class="bt-log-row" data-result="'+t.result+'" style="display:grid;grid-template-columns:30px 85px 38px 50px 60px 55px 55px 55px 42px 50px 60px 80px 90px 60px 1fr;gap:0;padding:3px 0;border-bottom:1px solid var(--border);font-size:11px">' +
           '<div style="color:var(--textDim);font-size:9px">'+(idx+1)+'</div>' +
           '<div style="color:var(--text)">'+t.date+'</div>' +
           '<div style="color:var(--textDim)">'+t.dayName+'</div>' +
           '<div style="color:'+(t.strat==='put'?'var(--green)':t.strat==='call'?'var(--orange)':'var(--cyan)')+'">'+t.strat.toUpperCase()+'</div>' +
+          '<div style="color:var(--blue)">'+t.entryPrice+'</div>' +
           '<div style="color:var(--textMid)">'+t.strike+'</div>' +
           '<div style="color:var(--text)">$'+t.credit+'</div>' +
           '<div style="color:var(--textMid)">'+t.close+'</div>' +
@@ -900,6 +885,7 @@ function runBacktest() {
           '<div style="color:'+(t.result==='WIN'?'var(--green)':'var(--red)')+';font-weight:700">'+t.result+'</div>' +
           '<div class="mono" style="color:'+(t.pnl>=0?'var(--green)':'var(--red)')+';font-weight:700">'+(t.pnl>=0?'+':'')+'$'+t.pnl.toLocaleString()+'</div>' +
           '<div class="mono" style="color:var(--white);font-size:10px">$'+t.capital.toLocaleString()+'</div>' +
+          '<div style="color:var(--gold);font-size:9px">'+(t.stopTime || '')+'</div>' +
           '<div style="color:'+(t.result==='WIN'?'var(--green)':'var(--red)')+';font-size:9px">'+t.reason+'</div>' +
         '</div>'
       ).join('') +
@@ -1065,9 +1051,9 @@ function filterTradeLog() {
 
 function downloadCSV() {
   if (!window._btTrades || !window._btTrades.length) return;
-  const header = 'Date,Day,Strategy,Strike,Credit,Close,VIX,Contracts,Result,PnL,Capital,Reason';
+  const header = 'Date,Day,Strategy,Entry,Strike,Credit,Close,VIX,Contracts,Result,PnL,Capital,StopTime,Reason';
   const rows = window._btTrades.map(t =>
-    [t.date, t.dayName, t.strat.toUpperCase(), t.strike, t.credit, t.close, t.vix.toFixed(1), t.cts, t.result, t.pnl, t.capital, '"'+t.reason+'"'].join(',')
+    [t.date, t.dayName, t.strat.toUpperCase(), t.entryPrice, t.strike, t.credit, t.close, t.vix.toFixed(1), t.cts, t.result, t.pnl, t.capital, '"'+(t.stopTime||'')+'"', '"'+t.reason+'"'].join(',')
   );
   const csv = [header, ...rows].join('\n');
   const blob = new Blob([csv], { type: 'text/csv' });
