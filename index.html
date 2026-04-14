@@ -114,10 +114,11 @@ input, select, button, textarea { font-family: 'IBM Plex Mono', monospace; outli
         </div>
         <div style="flex:1">
           <div style="font-size:8px;color:var(--textDim);margin-bottom:2px">LATE ×</div>
-          <input type="number" id="bt-tgLate" value="1" step="0.5" min="1" max="5" style="font-size:13px;font-weight:700;width:100%">
+          <input type="number" id="bt-tgLate" value="1.5" step="0.5" min="1" max="5" style="font-size:13px;font-weight:700;width:100%" onchange="checkLateMult()">
         </div>
       </div>
       <div style="font-size:8px;color:var(--textDim);margin-top:3px">Early × for first N hours (noise) · Late × after (theta decayed)</div>
+      <div id="bt-tgWarn" style="display:none;font-size:8px;color:var(--red);margin-top:2px;font-weight:700">⚠ 1× late stop = break-even stop. Spread is still worth ~1× credit shortly after entry — any adverse move = instant stop. Use 1.5× minimum.</div>
     </div>
     <div class="form-group">
       <label>DELTA</label>
@@ -154,7 +155,7 @@ input, select, button, textarea { font-family: 'IBM Plex Mono', monospace; outli
       <input type="number" id="bt-capital" value="10000" step="1000" style="font-size:14px;font-weight:700">
     </div>
   </div>
-  <div class="bt-grid-6" style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:14px">
+  <div class="bt-grid-5" style="display:grid;grid-template-columns:repeat(8,1fr);gap:10px;margin-bottom:14px">
     <div class="form-group">
       <label>PROFIT TARGET</label>
       <select id="bt-profitTgt" style="font-size:12px">
@@ -178,6 +179,16 @@ input, select, button, textarea { font-family: 'IBM Plex Mono', monospace; outli
       <label>STOP PROXIMITY %</label>
       <input type="number" id="bt-proximity" value="25" step="5" min="0" max="100" style="font-size:14px;font-weight:700">
       <div style="font-size:9px;color:var(--textDim);margin-top:2px">% of buffer remaining<br><span style="color:var(--gold)">25% = stop triggers when SPX is 75% of the way to strike</span></div>
+    </div>
+    <div class="form-group">
+      <label>0DTE IV SCALE</label>
+      <input type="number" id="bt-ivScale" value="1.3" step="0.1" min="1.0" max="2.0" style="font-size:14px;font-weight:700">
+      <div style="font-size:9px;color:var(--textDim);margin-top:2px">Real 0DTE IV ÷ VIX<br><span style="color:var(--gold)">1.0 = use raw VIX · 1.3 = typical 0DTE markup</span></div>
+    </div>
+    <div class="form-group">
+      <label>SLIPPAGE (PER SIDE)</label>
+      <input type="number" id="bt-slippage" value="0.10" step="0.05" min="0.00" max="0.50" style="font-size:14px;font-weight:700">
+      <div style="font-size:9px;color:var(--textDim);margin-top:2px">$ per spread on entry + close<br><span style="color:var(--gold)">Applied to open and to stop/close fills</span></div>
     </div>
     <div class="form-group">
       <label>ENTRY TIME (ET)</label>
@@ -279,6 +290,12 @@ function minuteToET(min) {
   return h12 + ':' + String(m).padStart(2, '0') + ' ' + ampm;
 }
 
+function checkLateMult() {
+  const v = parseFloat(document.getElementById('bt-tgLate').value);
+  document.getElementById('bt-tgWarn').style.display = v <= 1.0 ? 'block' : 'none';
+}
+checkLateMult();
+
 // ══════════════════════════════════════════════════════════════════════════════
 // BACKTEST ENGINE — 5-MIN BAR WALK
 // ══════════════════════════════════════════════════════════════════════════════
@@ -297,7 +314,9 @@ function runBacktest() {
   const minCredit = parseFloat(document.getElementById('bt-minCredit').value);
   const proximity = parseFloat(document.getElementById('bt-proximity').value) / 100;
   const hoursToExpiry = parseFloat(document.getElementById('bt-entryTime').value);
-  const SLIPPAGE = 0.05;
+  const ivScale = parseFloat(document.getElementById('bt-ivScale').value) || 1.0;
+  const SLIPPAGE = parseFloat(document.getElementById('bt-slippage').value) || 0.10;
+  const CLOSE_SLIPPAGE = SLIPPAGE; // same slippage applies when buying back
   const FEE_OPEN = 3;
   const FEE_CLOSE = 3;
 
@@ -307,7 +326,7 @@ function runBacktest() {
 
   // Count days with 5-min data
   const days5min = Object.keys(BARS_5MIN).length;
-  document.getElementById('bt-dataRange').textContent = `${HIST_DATA[0][0]} to ${HIST_DATA[HIST_DATA.length-1][0]} · ${HIST_DATA.length} daily · ${days5min} with 5-min bars`;
+  document.getElementById('bt-dataRange').textContent = `${HIST_DATA[0][0]} to ${HIST_DATA[HIST_DATA.length-1][0]} · ${days5min} days · IV×${ivScale} · slip $${SLIPPAGE.toFixed(2)}`;
 
   // ── Pre-calculate rolling indicators ──
   const closes = HIST_DATA.map(d => d[4]);
@@ -368,7 +387,7 @@ function runBacktest() {
     if (!entryBar) continue;
     const entryPrice = entryBar[1]; // bar open price
 
-    const iv = vix / 100;
+    const iv = (vix / 100) * ivScale; // scale VIX to approximate real 0DTE IV
     const hte = (390 - entryBar[0]) / 60; // hours to expiry from actual entry bar
     const T = (hte / 24) / 365;
     const r = 0.045;
@@ -534,7 +553,7 @@ function runBacktest() {
 
       if (breached) {
         result = 'LOSS'; reason = 'Strike breach → closed';
-        pnl = -(width - credit) * cts * 100;
+        pnl = -(width + CLOSE_SLIPPAGE - credit) * cts * 100;
       } else {
         // No breach — check profit target (50%) and 3PM time stop
         const profitTarget = credit * 0.5;
@@ -613,7 +632,7 @@ function runBacktest() {
             stopped = true; activelyClosed = true;
             reason = 'Points stop (' + stopVal + 'pts) at +' + minSinceEntry + 'min';
             stopTimeStr = minuteToET(bar[0]);
-            pnl = -(stopVal / width) * (width - credit) * cts * 100;
+            pnl = -((stopVal / width) * (width - credit) + CLOSE_SLIPPAGE) * cts * 100;
             result = 'LOSS';
             break;
           }
@@ -626,21 +645,21 @@ function runBacktest() {
             stopped = true; activelyClosed = true;
             reason = (isEarly ? tgEarlyMult + '× early stop' : tgLateMult + '× late stop') + ' at +' + minSinceEntry + 'min';
             stopTimeStr = minuteToET(bar[0]);
-            pnl = -(sp - credit) * cts * 100;
+            pnl = -(sp + CLOSE_SLIPPAGE - credit) * cts * 100;
             result = 'LOSS';
             break;
           } else if (stopMode === 'premium') {
             stopped = true; activelyClosed = true;
             reason = stopVal + '× premium stop at +' + minSinceEntry + 'min';
             stopTimeStr = minuteToET(bar[0]);
-            pnl = -(stopPrice - credit) * cts * 100;
+            pnl = -(stopPrice + CLOSE_SLIPPAGE - credit) * cts * 100;
             result = 'LOSS';
             break;
           } else { // time mode
             stopped = true; activelyClosed = true;
             reason = 'Time-based stop at +' + minSinceEntry + 'min';
             stopTimeStr = minuteToET(bar[0]);
-            pnl = -(stopPrice - credit) * cts * 100;
+            pnl = -(stopPrice + CLOSE_SLIPPAGE - credit) * cts * 100;
             result = 'LOSS';
             break;
           }
