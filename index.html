@@ -80,141 +80,179 @@ input, select, button, textarea { font-family: 'IBM Plex Mono', monospace; outli
 
 <!-- BACKTEST PANEL -->
 <div class="panel" style="padding:16px;margin-bottom:12px">
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
     <div class="chakra" style="font-size:20px;font-weight:700;color:var(--white)">STRATEGY BACKTEST</div>
     <div style="font-size:11px;color:var(--textDim)" id="bt-dataRange"></div>
   </div>
-  <div class="bt-grid-6" style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:14px">
-    <div class="form-group">
-      <label>STOP LOSS MODE</label>
-      <select id="bt-stopMode" style="font-size:12px" onchange="updateStopDesc()">
-        <option value="none">No Stop (hold to expiry)</option>
-        <option value="strike">Strike Breach (binary)</option>
-        <option value="premium">Premium Multiple</option>
-        <option value="timegated" selected>Time-Gated (2hr delay)</option>
-        <option value="points">SPX Points</option>
-        <option value="time">Time-Based %</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label>STOP VALUE</label>
-      <input type="number" id="bt-stopVal" value="2" step="0.5" min="1" style="font-size:14px;font-weight:700" disabled>
-      <div style="font-size:9px;color:var(--textDim);margin-top:2px" id="bt-stopDesc">Two-tier stop system</div>
-    </div>
-    <div class="form-group" id="bt-tg-group" style="display:block">
-      <label>TIME-GATE SETTINGS</label>
-      <div style="display:flex;gap:6px;align-items:center">
-        <div style="flex:1">
-          <div style="font-size:8px;color:var(--textDim);margin-bottom:2px">HOURS</div>
-          <input type="number" id="bt-tgHours" value="0.5" step="0.5" min="0.5" max="5" style="font-size:13px;font-weight:700;width:100%">
-        </div>
-        <div style="flex:1">
-          <div style="font-size:8px;color:var(--textDim);margin-bottom:2px">EARLY ×</div>
-          <input type="number" id="bt-tgEarly" value="2" step="0.5" min="1" max="5" style="font-size:13px;font-weight:700;width:100%">
-        </div>
-        <div style="flex:1">
-          <div style="font-size:8px;color:var(--textDim);margin-bottom:2px">LATE ×</div>
-          <input type="number" id="bt-tgLate" value="1.5" step="0.5" min="1" max="5" style="font-size:13px;font-weight:700;width:100%" onchange="checkLateMult()">
-        </div>
+
+  <!-- ── STRATEGY ── -->
+  <div style="margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--border)">
+    <div class="label" style="color:var(--gold);letter-spacing:3px;margin-bottom:8px">STRATEGY</div>
+    <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:10px">
+      <div class="form-group" style="margin-bottom:0">
+        <label>TYPE</label>
+        <select id="bt-strategy" style="font-size:13px;font-weight:700" onchange="updateStrategyUI()">
+          <option value="put">Put Credit Spread</option>
+          <option value="call">Call Credit Spread</option>
+          <option value="ic">Iron Condor</option>
+          <option value="bic">Breakeven IC (per-side stop)</option>
+          <option value="auto" selected>Auto (200 SMA + VIX/GEX)</option>
+        </select>
+        <div id="bt-stratHint" style="display:none;font-size:9px;color:var(--cyan);margin-top:3px">Equal credit both sides · each stopped at ×N independently · surviving leg expires · net P&L determines result</div>
       </div>
-      <div style="font-size:8px;color:var(--textDim);margin-top:3px">Early × for first N hours (noise) · Late × after (theta decayed)</div>
-      <div id="bt-tgWarn" style="display:none;font-size:8px;color:var(--red);margin-top:2px;font-weight:700">⚠ 1× late stop = break-even stop. Spread is still worth ~1× credit shortly after entry — any adverse move = instant stop. Use 1.5× minimum.</div>
-    </div>
-    <div class="form-group">
-      <label>DELTA</label>
-      <select id="bt-delta" style="font-size:12px">
-        <option value="0.08">0.08 (Ultra-safe)</option>
-        <option value="0.10">0.10 (Safe)</option>
-        <option value="0.12">0.12 (Morn)</option>
-        <option value="0.15" selected>0.15 (Arvo)</option>
-        <option value="0.18">0.18 (Med)</option>
-        <option value="0.20">0.20 (Aggr)</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label>SPREAD WIDTH</label>
-      <select id="bt-width" style="font-size:12px">
-        <option value="5">5 pts</option>
-        <option value="10">10 pts</option>
-        <option value="15" selected>15 pts</option>
-        <option value="20">20 pts</option>
-        <option value="25">25 pts</option>
-        <option value="30">30 pts</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label>STRATEGY</label>
-      <select id="bt-strategy" style="font-size:12px" onchange="updateStrategyHint()">
-        <option value="put">Put Spread</option>
-        <option value="call">Call Spread</option>
-        <option value="ic">Iron Condor</option>
-        <option value="bic">Breakeven IC (per-side stop)</option>
-        <option value="auto" selected>Auto (200 SMA + VIX/GEX)</option>
-      </select>
-      <div id="bt-stratHint" style="display:none;font-size:9px;color:var(--cyan);margin-top:3px">Equal credit both sides · each stopped at StopVal× independently · other side expires · uses premium stop regardless of mode</div>
-    </div>
-    <div class="form-group">
-      <label>STARTING CAPITAL</label>
-      <input type="number" id="bt-capital" value="10000" step="1000" style="font-size:14px;font-weight:700">
+      <div class="form-group" style="margin-bottom:0">
+        <label>SPREAD WIDTH</label>
+        <select id="bt-width" style="font-size:12px">
+          <option value="5">5 pts</option>
+          <option value="10">10 pts</option>
+          <option value="15" selected>15 pts</option>
+          <option value="20">20 pts</option>
+          <option value="25">25 pts</option>
+          <option value="30">30 pts</option>
+        </select>
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label>DELTA (SHORT LEG)</label>
+        <select id="bt-delta" style="font-size:12px">
+          <option value="0.08">0.08 — Ultra-safe</option>
+          <option value="0.10">0.10 — Safe</option>
+          <option value="0.12">0.12 — Conservative</option>
+          <option value="0.15" selected>0.15 — Standard</option>
+          <option value="0.18">0.18 — Moderate</option>
+          <option value="0.20">0.20 — Aggressive</option>
+        </select>
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label>ENTRY TIME (ET)</label>
+        <select id="bt-entryTime" style="font-size:12px">
+          <option value="6.5">9:30 AM (open)</option>
+          <option value="6.25">9:45 AM</option>
+          <option value="6.0">10:00 AM</option>
+          <option value="5.75">10:15 AM</option>
+          <option value="5.5">10:30 AM</option>
+          <option value="5.25">10:45 AM</option>
+          <option value="5.0">11:00 AM</option>
+          <option value="4.75">11:15 AM</option>
+          <option value="4.5" selected>11:30 AM</option>
+          <option value="4.25">11:45 AM</option>
+          <option value="4.0">12:00 PM</option>
+          <option value="3.75">12:15 PM</option>
+          <option value="3.5">12:30 PM</option>
+          <option value="3.25">12:45 PM</option>
+          <option value="3.0">1:00 PM</option>
+        </select>
+      </div>
     </div>
   </div>
-  <div class="bt-grid-5" style="display:grid;grid-template-columns:repeat(8,1fr);gap:10px;margin-bottom:14px">
-    <div class="form-group">
-      <label>PROFIT TARGET</label>
-      <select id="bt-profitTgt" style="font-size:12px">
-        <option value="0.5">50% credit</option>
-        <option value="0.75">75% credit</option>
-        <option value="1.0" selected>100% (hold to expiry)</option>
-      </select>
+
+  <!-- ── RISK MANAGEMENT ── -->
+  <div style="margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--border)">
+    <div class="label" style="color:var(--red);letter-spacing:3px;margin-bottom:8px">RISK MANAGEMENT</div>
+    <!-- Standard controls (put / call / ic / auto) -->
+    <div id="bt-risk-standard" style="display:grid;grid-template-columns:1.5fr 1fr 2fr 1fr;gap:10px">
+      <div class="form-group" style="margin-bottom:0">
+        <label>STOP LOSS MODE</label>
+        <select id="bt-stopMode" style="font-size:12px" onchange="updateStopDesc()">
+          <option value="none">No Stop (hold to expiry)</option>
+          <option value="strike">Strike Breach (binary)</option>
+          <option value="premium">Premium Multiple</option>
+          <option value="timegated" selected>Time-Gated (2hr delay)</option>
+          <option value="points">SPX Points</option>
+          <option value="time">Time-Based %</option>
+        </select>
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label>STOP VALUE</label>
+        <input type="number" id="bt-stopVal" value="2" step="0.5" min="1" style="font-size:14px;font-weight:700" disabled>
+        <div style="font-size:9px;color:var(--textDim);margin-top:2px" id="bt-stopDesc">Two-tier stop system</div>
+      </div>
+      <div class="form-group" id="bt-tg-group" style="margin-bottom:0;display:block">
+        <label>TIME-GATE SETTINGS</label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <div style="flex:1">
+            <div style="font-size:8px;color:var(--textDim);margin-bottom:2px">HOURS</div>
+            <input type="number" id="bt-tgHours" value="0.5" step="0.5" min="0.5" max="5" style="font-size:13px;font-weight:700;width:100%">
+          </div>
+          <div style="flex:1">
+            <div style="font-size:8px;color:var(--textDim);margin-bottom:2px">EARLY ×</div>
+            <input type="number" id="bt-tgEarly" value="2" step="0.5" min="1" max="5" style="font-size:13px;font-weight:700;width:100%">
+          </div>
+          <div style="flex:1">
+            <div style="font-size:8px;color:var(--textDim);margin-bottom:2px">LATE ×</div>
+            <input type="number" id="bt-tgLate" value="1.5" step="0.5" min="1" max="5" style="font-size:13px;font-weight:700;width:100%" onchange="checkLateMult()">
+          </div>
+        </div>
+        <div style="font-size:8px;color:var(--textDim);margin-top:3px">Early × for first N hours · Late × after (theta decayed)</div>
+        <div id="bt-tgWarn" style="display:none;font-size:8px;color:var(--red);margin-top:2px;font-weight:700">⚠ 1× late stop = break-even stop. Use 1.5× minimum.</div>
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label>STOP PROXIMITY %</label>
+        <input type="number" id="bt-proximity" value="25" step="5" min="0" max="100" style="font-size:14px;font-weight:700">
+        <div style="font-size:9px;color:var(--textDim);margin-top:2px">% buffer remaining to strike<br><span style="color:var(--gold)">25% = fires 75% of way to strike</span></div>
+      </div>
     </div>
-    <div class="form-group">
-      <label>CONTRACTS</label>
-      <select id="bt-contracts" style="font-size:12px">
-        <option value="fixed">Fixed (from capital)</option>
-        <option value="phase" selected>Phase-based scaling</option>
-      </select>
+    <!-- BIC controls -->
+    <div id="bt-risk-bic" style="display:none;grid-template-columns:1fr 2fr;gap:10px">
+      <div class="form-group" style="margin-bottom:0">
+        <label>STOP MULTIPLIER (× PER LEG)</label>
+        <input type="number" id="bt-stopValBic" value="2" step="0.5" min="1" style="font-size:20px;font-weight:700;color:var(--gold)">
+        <div style="font-size:9px;color:var(--textDim);margin-top:2px">× each leg's own credit<br><span style="color:var(--gold)">2× put = stop when put spread hits 2× put credit</span></div>
+      </div>
+      <div style="padding:10px;background:var(--panelAlt);border:1px solid var(--borderBright);font-size:11px;color:var(--textDim);line-height:1.7;align-self:start">
+        <div style="color:var(--cyan);font-weight:700;margin-bottom:4px;letter-spacing:1px">BREAKEVEN IC MECHANICS</div>
+        Put leg and call leg are stopped <strong style="color:var(--white)">independently</strong> at ×N their own credit via BSM mark-to-market.<br>
+        Stopped leg is bought back for a loss. Surviving leg held to expiry.<br>
+        True loss days = <strong style="color:var(--red)">both legs stopped</strong>. One-leg days ≈ breakeven by design.
+      </div>
     </div>
-    <div class="form-group">
-      <label>MIN CREDIT</label>
-      <input type="number" id="bt-minCredit" value="0.60" step="0.05" min="0.30" style="font-size:14px;font-weight:700">
+  </div>
+
+  <!-- ── TRADE PARAMETERS ── -->
+  <div style="margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--border)">
+    <div class="label" style="color:var(--blue);letter-spacing:3px;margin-bottom:8px">TRADE PARAMETERS</div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+      <div class="form-group" style="margin-bottom:0">
+        <label>STARTING CAPITAL</label>
+        <input type="number" id="bt-capital" value="10000" step="1000" style="font-size:14px;font-weight:700">
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label>CONTRACTS</label>
+        <select id="bt-contracts" style="font-size:12px">
+          <option value="fixed">Fixed (from capital)</option>
+          <option value="phase" selected>Phase-based scaling</option>
+        </select>
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label>MIN CREDIT</label>
+        <input type="number" id="bt-minCredit" value="0.60" step="0.05" min="0.30" style="font-size:14px;font-weight:700">
+        <div style="font-size:9px;color:var(--textDim);margin-top:2px">Per leg for BIC · total for others</div>
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label>PROFIT TARGET</label>
+        <select id="bt-profitTgt" style="font-size:12px">
+          <option value="0.5">50% of credit</option>
+          <option value="0.75">75% of credit</option>
+          <option value="1.0" selected>100% — hold to expiry</option>
+        </select>
+      </div>
     </div>
-    <div class="form-group">
-      <label>STOP PROXIMITY %</label>
-      <input type="number" id="bt-proximity" value="25" step="5" min="0" max="100" style="font-size:14px;font-weight:700">
-      <div style="font-size:9px;color:var(--textDim);margin-top:2px">% of buffer remaining<br><span style="color:var(--gold)">25% = stop triggers when SPX is 75% of the way to strike</span></div>
-    </div>
-    <div class="form-group">
-      <label>0DTE IV SCALE</label>
-      <input type="number" id="bt-ivScale" value="0.8" step="0.05" min="0.5" max="1.5" style="font-size:14px;font-weight:700">
-      <div style="font-size:9px;color:var(--textDim);margin-top:2px">0DTE vol vs VIX<br><span style="color:var(--gold)">0.8 = intraday vol discount (no overnight risk)</span></div>
-    </div>
-    <div class="form-group">
-      <label>SLIPPAGE (PER SIDE)</label>
-      <input type="number" id="bt-slippage" value="0.15" step="0.05" min="0.00" max="0.50" style="font-size:14px;font-weight:700">
-      <div style="font-size:9px;color:var(--textDim);margin-top:2px">$ per spread on entry + close<br><span style="color:var(--gold)">Mid-to-fill gap per spread leg</span></div>
-    </div>
-    <div class="form-group">
-      <label>ENTRY TIME (ET)</label>
-      <select id="bt-entryTime" style="font-size:12px">
-        <option value="6.5">9:30 AM (open)</option>
-        <option value="6.25">9:45 AM (+15 min)</option>
-        <option value="6.0">10:00 AM (+30 min)</option>
-        <option value="5.75">10:15 AM (+45 min)</option>
-        <option value="5.5">10:30 AM (+1 hr)</option>
-        <option value="5.25">10:45 AM (+1h 15)</option>
-        <option value="5.0">11:00 AM (+1h 30)</option>
-        <option value="4.75">11:15 AM (+1h 45)</option>
-        <option value="4.5" selected>11:30 AM (+2 hr)</option>
-        <option value="4.25">11:45 AM (+2h 15)</option>
-        <option value="4.0">12:00 PM (+2h 30)</option>
-        <option value="3.75">12:15 PM (+2h 45)</option>
-        <option value="3.5">12:30 PM (+3 hr)</option>
-        <option value="3.25">12:45 PM (+3h 15)</option>
-        <option value="3.0">1:00 PM (+3h 30)</option>
-      </select>
-    </div>
-    <div style="display:flex;align-items:flex-end">
-      <button class="btn" style="width:100%;padding:12px;font-size:14px;font-weight:700;color:var(--green);border-color:var(--green);cursor:pointer;letter-spacing:2px" onclick="runBacktest()">RUN BACKTEST</button>
+  </div>
+
+  <!-- ── MARKET MODEL + RUN ── -->
+  <div>
+    <div class="label" style="color:var(--purple);letter-spacing:3px;margin-bottom:8px">MARKET MODEL</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 2fr;gap:10px;align-items:end">
+      <div class="form-group" style="margin-bottom:0">
+        <label>0DTE IV SCALE</label>
+        <input type="number" id="bt-ivScale" value="0.8" step="0.05" min="0.5" max="1.5" style="font-size:14px;font-weight:700">
+        <div style="font-size:9px;color:var(--textDim);margin-top:2px">0DTE vol vs VIX · <span style="color:var(--gold)">0.8 = intraday discount</span></div>
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label>SLIPPAGE (PER LEG)</label>
+        <input type="number" id="bt-slippage" value="0.15" step="0.05" min="0.00" max="0.50" style="font-size:14px;font-weight:700">
+        <div style="font-size:9px;color:var(--textDim);margin-top:2px">$ per spread · entry + exit</div>
+      </div>
+      <button class="btn" style="width:100%;padding:14px;font-size:15px;font-weight:700;color:var(--green);border-color:var(--green);cursor:pointer;letter-spacing:3px" onclick="runBacktest()">RUN BACKTEST</button>
     </div>
   </div>
 </div>
@@ -301,14 +339,18 @@ function findBalancedStrikes(S, iv, T, r, width, slip) {
   return best;
 }
 
-function updateStrategyHint() {
+function updateStrategyUI() {
   const strat = document.getElementById('bt-strategy').value;
   const hint = document.getElementById('bt-stratHint');
+  const riskStd = document.getElementById('bt-risk-standard');
+  const riskBic = document.getElementById('bt-risk-bic');
   hint.style.display = strat === 'bic' ? 'block' : 'none';
-  // Auto-select premium stop mode for BIC so stopVal is editable
   if (strat === 'bic') {
-    document.getElementById('bt-stopMode').value = 'premium';
-    updateStopDesc();
+    riskStd.style.display = 'none';
+    riskBic.style.display = 'grid';
+  } else {
+    riskStd.style.display = 'grid';
+    riskBic.style.display = 'none';
   }
 }
 
@@ -347,14 +389,16 @@ checkLateMult();
 // BACKTEST ENGINE — 5-MIN BAR WALK
 // ══════════════════════════════════════════════════════════════════════════════
 function runBacktest() {
-  const stopMode = document.getElementById('bt-stopMode').value;
-  const stopVal = parseFloat(document.getElementById('bt-stopVal').value);
+  const strategy = document.getElementById('bt-strategy').value;
+  const stopMode = strategy === 'bic' ? 'premium' : document.getElementById('bt-stopMode').value;
+  const stopVal = strategy === 'bic'
+    ? parseFloat(document.getElementById('bt-stopValBic').value) || 2
+    : parseFloat(document.getElementById('bt-stopVal').value);
   const tgHours = parseFloat(document.getElementById('bt-tgHours').value) || 2;
   const tgEarlyMult = parseFloat(document.getElementById('bt-tgEarly').value) || 2;
   const tgLateMult = parseFloat(document.getElementById('bt-tgLate').value) || 1.5;
   const delta = parseFloat(document.getElementById('bt-delta').value);
   const width = parseInt(document.getElementById('bt-width').value);
-  const strategy = document.getElementById('bt-strategy').value;
   const startCap = parseFloat(document.getElementById('bt-capital').value);
   const profitPct = parseFloat(document.getElementById('bt-profitTgt').value);
   const contractMode = document.getElementById('bt-contracts').value;
@@ -807,7 +851,10 @@ function runBacktest() {
     if (capital < 0) capital = 0;
 
     trades.push({
-      date, strat, strike: strat==='call'?sC:sP, credit: credit.toFixed(2), cts, result,
+      date, strat,
+      putStrike: sP, callStrike: sC,
+      putCr: putCredit.toFixed(2), callCr: callCredit.toFixed(2),
+      credit: credit.toFixed(2), cts, result,
       pnl: Math.round(pnl), capital: Math.round(capital), vix, dayName,
       bias: biasLabel, gex, reason, close: close.toFixed(2),
       entryPrice: entryPrice.toFixed(2), stopTime: stopTimeStr
@@ -1012,28 +1059,32 @@ function runBacktest() {
       '</div>' +
     '</div>' +
     '<div style="overflow-y:auto;max-height:calc(100vh - 200px)" id="bt-log-container">' +
-      '<div style="display:grid;grid-template-columns:30px 85px 38px 50px 60px 55px 55px 55px 42px 50px 60px 80px 90px 60px 1fr;gap:0;font-size:9px;color:var(--textDim);letter-spacing:1px;padding:4px 0;border-bottom:2px solid var(--borderBright);position:sticky;top:0;background:var(--panel);z-index:1">' +
-        '<div>#</div><div>DATE</div><div>DAY</div><div>STRAT</div><div>ENTRY</div><div>STRIKE</div><div>CREDIT</div><div>CLOSE</div><div>VIX</div><div>CTS</div><div>RESULT</div><div>P&L</div><div>CAPITAL</div><div>STOP TIME</div><div>REASON</div>' +
+      '<div style="display:grid;grid-template-columns:30px 85px 35px 45px 62px 55px 55px 75px 55px 35px 35px 55px 70px 80px 62px 1fr;gap:0;font-size:9px;color:var(--textDim);letter-spacing:1px;padding:4px 0;border-bottom:2px solid var(--borderBright);position:sticky;top:0;background:var(--panel);z-index:1">' +
+        '<div>#</div><div>DATE</div><div>DAY</div><div>STRAT</div><div>ENTRY</div><div>PUT K</div><div>CALL K</div><div>CREDIT</div><div>CLOSE</div><div>VIX</div><div>CTS</div><div>RESULT</div><div>P&L</div><div>CAPITAL</div><div>STOP TIME</div><div>REASON</div>' +
       '</div>' +
-      trades.map((t,idx) =>
-        '<div class="bt-log-row" data-result="'+t.result+'" style="display:grid;grid-template-columns:30px 85px 38px 50px 60px 55px 55px 55px 42px 50px 60px 80px 90px 60px 1fr;gap:0;padding:3px 0;border-bottom:1px solid var(--border);font-size:11px">' +
+      trades.map((t,idx) => {
+        const isBothLegs = (t.strat === 'ic' || t.strat === 'bic');
+        const creditDisplay = isBothLegs ? '$'+t.putCr+'/<br>$'+t.callCr : '$'+t.credit;
+        const stratColor = t.strat==='put'?'var(--green)':t.strat==='call'?'var(--orange)':t.strat==='bic'?'var(--purple)':'var(--cyan)';
+        return '<div class="bt-log-row" data-result="'+t.result+'" style="display:grid;grid-template-columns:30px 85px 35px 45px 62px 55px 55px 75px 55px 35px 35px 55px 70px 80px 62px 1fr;gap:0;padding:3px 0;border-bottom:1px solid var(--border);font-size:11px;align-items:center">' +
           '<div style="color:var(--textDim);font-size:9px">'+(idx+1)+'</div>' +
           '<div style="color:var(--text)">'+t.date+'</div>' +
           '<div style="color:var(--textDim)">'+t.dayName+'</div>' +
-          '<div style="color:'+(t.strat==='put'?'var(--green)':t.strat==='call'?'var(--orange)':'var(--cyan)')+'">'+t.strat.toUpperCase()+'</div>' +
+          '<div style="color:'+stratColor+';font-weight:700;font-size:10px">'+t.strat.toUpperCase()+'</div>' +
           '<div style="color:var(--blue)">'+t.entryPrice+'</div>' +
-          '<div style="color:var(--textMid)">'+t.strike+'</div>' +
-          '<div style="color:var(--text)">$'+t.credit+'</div>' +
+          '<div style="color:'+(t.strat==='call'?'var(--textDim)':'var(--green)')+';font-weight:'+(t.strat==='call'?'400':'600')+'">'+(t.strat==='call'?'—':t.putStrike)+'</div>' +
+          '<div style="color:'+(t.strat==='put'?'var(--textDim)':'var(--orange)')+';font-weight:'+(t.strat==='put'?'400':'600')+'">'+(t.strat==='put'?'—':t.callStrike)+'</div>' +
+          '<div style="color:var(--text);font-size:10px;line-height:1.3">'+creditDisplay+'</div>' +
           '<div style="color:var(--textMid)">'+t.close+'</div>' +
           '<div style="color:'+(t.vix>25?'var(--red)':t.vix>18?'var(--gold)':'var(--green)')+'">'+t.vix.toFixed(0)+'</div>' +
           '<div style="color:var(--white);font-weight:600">'+t.cts+'</div>' +
-          '<div style="color:'+(t.result==='WIN'?'var(--green)':'var(--red)')+';font-weight:700">'+t.result+'</div>' +
+          '<div style="color:'+(t.result==='WIN'?'var(--green)':'var(--red)')+';font-weight:700;font-size:10px">'+t.result+'</div>' +
           '<div class="mono" style="color:'+(t.pnl>=0?'var(--green)':'var(--red)')+';font-weight:700">'+(t.pnl>=0?'+':'')+'$'+t.pnl.toLocaleString()+'</div>' +
           '<div class="mono" style="color:var(--white);font-size:10px">$'+t.capital.toLocaleString()+'</div>' +
           '<div style="color:var(--gold);font-size:9px">'+(t.stopTime || '')+'</div>' +
-          '<div style="color:'+(t.result==='WIN'?'var(--green)':'var(--red)')+';font-size:9px">'+t.reason+'</div>' +
-        '</div>'
-      ).join('') +
+          '<div style="color:'+(t.result==='WIN'?'var(--textMid)':'var(--red)')+';font-size:9px">'+t.reason+'</div>' +
+        '</div>';
+      }).join('') +
     '</div></div>';
 
   // Show tabs
@@ -1196,9 +1247,9 @@ function filterTradeLog() {
 
 function downloadCSV() {
   if (!window._btTrades || !window._btTrades.length) return;
-  const header = 'Date,Day,Strategy,Entry,Strike,Credit,Close,VIX,Contracts,Result,PnL,Capital,StopTime,Reason';
+  const header = 'Date,Day,Strategy,Entry,PutStrike,CallStrike,Credit,PutCredit,CallCredit,Close,VIX,Contracts,Result,PnL,Capital,StopTime,Reason';
   const rows = window._btTrades.map(t =>
-    [t.date, t.dayName, t.strat.toUpperCase(), t.entryPrice, t.strike, t.credit, t.close, t.vix.toFixed(1), t.cts, t.result, t.pnl, t.capital, '"'+(t.stopTime||'')+'"', '"'+t.reason+'"'].join(',')
+    [t.date, t.dayName, t.strat.toUpperCase(), t.entryPrice, t.putStrike, t.callStrike, t.credit, t.putCr, t.callCr, t.close, t.vix.toFixed(1), t.cts, t.result, t.pnl, t.capital, '"'+(t.stopTime||'')+'"', '"'+t.reason+'"'].join(',')
   );
   const csv = [header, ...rows].join('\n');
   const blob = new Blob([csv], { type: 'text/csv' });
