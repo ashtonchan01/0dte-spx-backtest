@@ -139,16 +139,19 @@ input, select, button, textarea { font-family: 'IBM Plex Mono', monospace; outli
         <option value="15" selected>15 pts</option>
         <option value="20">20 pts</option>
         <option value="25">25 pts</option>
+        <option value="30">30 pts</option>
       </select>
     </div>
     <div class="form-group">
       <label>STRATEGY</label>
-      <select id="bt-strategy" style="font-size:12px">
+      <select id="bt-strategy" style="font-size:12px" onchange="updateStrategyHint()">
         <option value="put">Put Spread</option>
         <option value="call">Call Spread</option>
         <option value="ic">Iron Condor</option>
+        <option value="bic">Breakeven IC (per-side stop)</option>
         <option value="auto" selected>Auto (200 SMA + VIX/GEX)</option>
       </select>
+      <div id="bt-stratHint" style="display:none;font-size:9px;color:var(--cyan);margin-top:3px">Equal credit both sides · each stopped at StopVal× independently · other side expires · uses premium stop regardless of mode</div>
     </div>
     <div class="form-group">
       <label>STARTING CAPITAL</label>
@@ -263,6 +266,50 @@ function findStrike(S, iv, T, targetDelta, type) {
     else { type === 'put' ? (lo = mid) : (hi = mid); }
   }
   return Math.round(((lo + hi) / 2) / 5) * 5;
+}
+
+// Find call strike where callCredit ≈ putCredit (for Breakeven IC)
+function findBalancedStrikes(S, iv, T, r, width, slip) {
+  // Anchor: put side at delta ~0.15
+  const sP = findStrike(S, iv, T, 0.15, 'put');
+  const lP = sP - width;
+  const putC = Math.max(bsm(S, sP, T, r, iv, 'put').price - bsm(S, lP, T, r, iv, 'put').price - slip, 0);
+  if (putC <= 0) return null;
+
+  // Binary search: find call strike where callCredit ≈ putC
+  // Further OTM → lower callC; closer to ATM → higher callC
+  let lo = S + 5, hi = S + S * 0.15;
+  for (let i = 0; i < 60; i++) {
+    const mid = Math.round(((lo + hi) / 2) / 5) * 5;
+    const lC_tmp = mid + width;
+    const callC_tmp = Math.max(bsm(S, mid, T, r, iv, 'call').price - bsm(S, lC_tmp, T, r, iv, 'call').price - slip, 0);
+    if (callC_tmp > putC) lo = mid + 5;   // too close, push further OTM
+    else hi = mid - 5;                     // too far, pull closer
+  }
+
+  // Pick best candidate around converged point
+  let best = null, bestDiff = Infinity;
+  const center = Math.round(((lo + hi) / 2) / 5) * 5;
+  for (let offset = -15; offset <= 15; offset += 5) {
+    const sC = center + offset;
+    if (sC <= S) continue;
+    const lC = sC + width;
+    const callC = Math.max(bsm(S, sC, T, r, iv, 'call').price - bsm(S, lC, T, r, iv, 'call').price - slip, 0);
+    const diff = Math.abs(callC - putC);
+    if (diff < bestDiff) { bestDiff = diff; best = { sP, lP, sC, lC, putC, callC }; }
+  }
+  return best;
+}
+
+function updateStrategyHint() {
+  const strat = document.getElementById('bt-strategy').value;
+  const hint = document.getElementById('bt-stratHint');
+  hint.style.display = strat === 'bic' ? 'block' : 'none';
+  // Auto-select premium stop mode for BIC so stopVal is editable
+  if (strat === 'bic') {
+    document.getElementById('bt-stopMode').value = 'premium';
+    updateStopDesc();
+  }
 }
 
 function updateStopDesc() {
@@ -464,8 +511,15 @@ function runBacktest() {
     }
 
     // Find strikes using entryPrice
-    const sP = findStrike(entryPrice, iv, T, delta, 'put'), lP = sP - width;
-    const sC = findStrike(entryPrice, iv, T, delta, 'call'), lC = sC + width;
+    let sP, lP, sC, lC;
+    if (strat === 'bic') {
+      const bal = findBalancedStrikes(entryPrice, iv, T, r, width, SLIPPAGE);
+      if (!bal) continue;
+      sP = bal.sP; lP = bal.lP; sC = bal.sC; lC = bal.lC;
+    } else {
+      sP = findStrike(entryPrice, iv, T, delta, 'put'); lP = sP - width;
+      sC = findStrike(entryPrice, iv, T, delta, 'call'); lC = sC + width;
+    }
 
     // Calculate credits using entryPrice
     const putCredit = Math.max(bsm(entryPrice,sP,T,r,iv,'put').price - bsm(entryPrice,lP,T,r,iv,'put').price - SLIPPAGE, 0);
@@ -473,11 +527,13 @@ function runBacktest() {
     const icCredit = putCredit + callCredit;
 
     let credit;
-    if (strat === 'ic') credit = icCredit;
+    if (strat === 'ic' || strat === 'bic') credit = icCredit;
     else if (strat === 'call') credit = callCredit;
     else credit = putCredit;
 
-    if (!(credit >= minCredit)) continue;
+    // For BIC, both sides must independently meet min credit
+    if (strat === 'bic') { if (!(putCredit >= minCredit && callCredit >= minCredit)) continue; }
+    else { if (!(credit >= minCredit)) continue; }
 
     // ── Stop detection — walk 5-min bars ──
     const putBuffer = entryPrice - sP;
@@ -486,7 +542,77 @@ function runBacktest() {
     let activelyClosed = false;
     let stopTimeStr = '';
 
-    if (stopMode === 'none') {
+    if (strat === 'bic') {
+      // ══════════════════════════════════════════════════════════════
+      // BREAKEVEN IC — independent per-side stop management
+      // Each leg stopped at stopVal × that leg's credit (BSM mark-to-market)
+      // Stopped leg closed; surviving leg held to expiry
+      // ══════════════════════════════════════════════════════════════
+      const putStopThresh  = putCredit  * stopVal;
+      const callStopThresh = callCredit * stopVal;
+      let putStopped = false, callStopped = false;
+      let putExitCost = 0, callExitCost = 0;
+      let putStopTime = '', callStopTime = '';
+
+      for (let j = 0; j < dayBars.length; j++) {
+        const bar = dayBars[j];
+        if (bar[0] < entryBar[0]) continue;
+        const remT = Math.max(0.000001, (390 - bar[0]) / 60 / 24 / 365);
+
+        if (!putStopped) {
+          const curPutVal = Math.max(0,
+            bsm(bar[3], sP, remT, r, iv, 'put').price - bsm(bar[3], lP, remT, r, iv, 'put').price
+          );
+          if (curPutVal >= putStopThresh) {
+            putStopped = true;
+            putExitCost = putStopThresh + CLOSE_SLIPPAGE;
+            putStopTime = minuteToET(bar[0]);
+            activelyClosed = true;
+          }
+        }
+
+        if (!callStopped) {
+          const curCallVal = Math.max(0,
+            bsm(bar[2], sC, remT, r, iv, 'call').price - bsm(bar[2], lC, remT, r, iv, 'call').price
+          );
+          if (curCallVal >= callStopThresh) {
+            callStopped = true;
+            callExitCost = callStopThresh + CLOSE_SLIPPAGE;
+            callStopTime = minuteToET(bar[0]);
+            activelyClosed = true;
+          }
+        }
+
+        if (putStopped && callStopped) break;
+      }
+
+      // Expiry settlement for legs NOT stopped (use actual close)
+      const dayClose = dayBars[dayBars.length - 1][4];
+      if (!putStopped)  putExitCost  = Math.max(0, Math.min(sP - dayClose, width));
+      if (!callStopped) callExitCost = Math.max(0, Math.min(dayClose - sC, width));
+
+      const putLegPnL  = putCredit  - putExitCost;
+      const callLegPnL = callCredit - callExitCost;
+      pnl = (putLegPnL + callLegPnL) * cts * 100;
+
+      if (putStopped && callStopped) {
+        result = 'LOSS';
+        reason = '⚡ Both legs stopped (' + stopVal + '×) | put@' + putStopTime + ' call@' + callStopTime;
+        stopTimeStr = putStopTime;
+      } else if (putStopped) {
+        result = (putLegPnL + callLegPnL) >= 0 ? 'WIN' : 'LOSS';
+        reason = '↓ Put ' + stopVal + '× stop@' + putStopTime + ' · call expired ' + (dayClose < sC ? 'OTM' : 'ITM');
+        stopTimeStr = putStopTime;
+      } else if (callStopped) {
+        result = (putLegPnL + callLegPnL) >= 0 ? 'WIN' : 'LOSS';
+        reason = '↑ Call ' + stopVal + '× stop@' + callStopTime + ' · put expired ' + (dayClose > sP ? 'OTM' : 'ITM');
+        stopTimeStr = callStopTime;
+      } else {
+        result = pnl >= 0 ? 'WIN' : 'LOSS';
+        reason = 'Both expired OTM';
+      }
+
+    } else if (stopMode === 'none') {
       // ══════════════════════════════════════════════════════════════
       // NO STOP — hold to expiry with PARTIAL LOSS modeling
       // Uses real close from last 5-min bar
@@ -1086,3 +1212,4 @@ function downloadCSV() {
 </script>
 </body>
 </html>
+
