@@ -224,6 +224,7 @@ input, select, button, textarea { font-family: 'IBM Plex Mono', monospace; outli
         <select id="bt-contracts" style="font-size:12px">
           <option value="fixed">Fixed (from capital)</option>
           <option value="phase" selected>Phase-based scaling</option>
+          <option value="risk2pct">2% risk scaling (start 1 ct)</option>
         </select>
       </div>
       <div class="form-group" style="margin-bottom:0">
@@ -496,6 +497,8 @@ function runWeeklyBacktest() {
       const ph = getPhaseForCap(capital);
       const adjPerK = ph.perK > 0 ? ph.perK * (marginPerCt / 250) : 0;
       cts = adjPerK > 0 ? Math.max(1, Math.floor(capital / adjPerK)) : 2;
+    } else if (contractMode === 'risk2pct') {
+      cts = Math.max(1, Math.floor(capital * 0.02 / (width * 100)));
     } else {
       cts = Math.max(1, Math.floor(capital / (marginPerCt * 6)));
     }
@@ -781,6 +784,8 @@ function runDailyWeeklyBacktest() {
       const ph = getPhaseForCap(capital);
       const adjPerK = ph.perK > 0 ? ph.perK * (marginPerCt / 250) : 0;
       cts = adjPerK > 0 ? Math.max(1, Math.floor(capital / adjPerK)) : 2;
+    } else if (contractMode === 'risk2pct') {
+      cts = Math.max(1, Math.floor(capital * 0.02 / (width * 100)));
     } else {
       cts = Math.max(1, Math.floor(capital / (marginPerCt * 6)));
     }
