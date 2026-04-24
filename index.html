@@ -124,7 +124,7 @@ input, select, button, textarea { font-family: 'IBM Plex Mono', monospace; outli
           <option value="0.20">0.20 — Aggressive</option>
         </select>
       </div>
-      <div class="form-group hide-weekly" style="margin-bottom:0">
+      <div class="form-group" style="margin-bottom:0">
         <label>ENTRY TIME (ET)</label>
         <select id="bt-entryTime" style="font-size:12px">
           <option value="6.5">9:30 AM (open)</option>
@@ -415,6 +415,8 @@ function runWeeklyBacktest() {
   const T          = 7 / 365;
   const r          = 0.045;
   const FEE        = 6; // $3 open + $3 close per contract
+  const hoursToExpiry = parseFloat(document.getElementById('bt-entryTime').value);
+  const entryMinute = Math.round((6.5 - hoursToExpiry) * 60); // mins after 9:30
 
   // Build O(1) date lookup
   const histMap = {};
@@ -444,8 +446,8 @@ function runWeeklyBacktest() {
     const dayBars = BARS_5MIN[date];
     let entryPrice;
     if (dayBars && dayBars.length > 0) {
-      const bar935 = dayBars.find(b => b[0] >= 5); // minute 5 = 9:35
-      entryPrice = bar935 ? bar935[4] : dOpen;      // close of that bar
+      const bar935 = dayBars.find(b => b[0] >= entryMinute);
+      entryPrice = bar935 ? bar935[4] : dOpen;
     } else {
       entryPrice = dOpen;
     }
