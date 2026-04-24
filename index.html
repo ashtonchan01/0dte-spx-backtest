@@ -86,7 +86,7 @@ input, select, button, textarea { font-family: 'IBM Plex Mono', monospace; outli
   </div>
 
   <!-- ── STRATEGY ── -->
-  <div style="margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--border)">
+  <div id="bt-strat-section" style="margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--border)">
     <div class="label" style="color:var(--gold);letter-spacing:3px;margin-bottom:8px">STRATEGY</div>
     <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:10px">
       <div class="form-group" style="margin-bottom:0">
@@ -97,8 +97,10 @@ input, select, button, textarea { font-family: 'IBM Plex Mono', monospace; outli
           <option value="ic">Iron Condor</option>
           <option value="bic">Breakeven IC (per-side stop)</option>
           <option value="auto" selected>Auto (200 SMA + VIX/GEX)</option>
+          <option value="weekly">7DTE Weekly Monday — ATM Put Spread</option>
         </select>
         <div id="bt-stratHint" style="display:none;font-size:9px;color:var(--cyan);margin-top:3px">Equal credit both sides · each stopped at ×N independently · surviving leg expires · net P&L determines result</div>
+        <div id="bt-weeklyHint" style="display:none;font-size:9px;color:var(--gold);margin-top:3px">Entry: Monday 9:35 AM (first 5-min candle close) · ATM short put · hold to expiry next Monday · no intraday stop</div>
       </div>
       <div class="form-group" style="margin-bottom:0">
         <label>SPREAD WIDTH</label>
@@ -111,7 +113,7 @@ input, select, button, textarea { font-family: 'IBM Plex Mono', monospace; outli
           <option value="30">30 pts</option>
         </select>
       </div>
-      <div class="form-group" style="margin-bottom:0">
+      <div class="form-group hide-weekly" style="margin-bottom:0">
         <label>DELTA (SHORT LEG)</label>
         <select id="bt-delta" style="font-size:12px">
           <option value="0.08">0.08 — Ultra-safe</option>
@@ -122,7 +124,7 @@ input, select, button, textarea { font-family: 'IBM Plex Mono', monospace; outli
           <option value="0.20">0.20 — Aggressive</option>
         </select>
       </div>
-      <div class="form-group" style="margin-bottom:0">
+      <div class="form-group hide-weekly" style="margin-bottom:0">
         <label>ENTRY TIME (ET)</label>
         <select id="bt-entryTime" style="font-size:12px">
           <option value="6.5">9:30 AM (open)</option>
@@ -146,7 +148,7 @@ input, select, button, textarea { font-family: 'IBM Plex Mono', monospace; outli
   </div>
 
   <!-- ── RISK MANAGEMENT ── -->
-  <div style="margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--border)">
+  <div id="bt-risk-section" style="margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--border)">
     <div class="label" style="color:var(--red);letter-spacing:3px;margin-bottom:8px">RISK MANAGEMENT</div>
     <!-- Standard controls (put / call / ic / auto) -->
     <div id="bt-risk-standard" style="display:grid;grid-template-columns:1.5fr 1fr 2fr 1fr;gap:10px">
@@ -342,15 +344,30 @@ function findBalancedStrikes(S, iv, T, r, width, slip) {
 function updateStrategyUI() {
   const strat = document.getElementById('bt-strategy').value;
   const hint = document.getElementById('bt-stratHint');
+  const weeklyHint = document.getElementById('bt-weeklyHint');
   const riskStd = document.getElementById('bt-risk-standard');
   const riskBic = document.getElementById('bt-risk-bic');
+  const riskSection = document.getElementById('bt-risk-section');
+  const stratSection = document.getElementById('bt-strat-section');
+
   hint.style.display = strat === 'bic' ? 'block' : 'none';
+  weeklyHint.style.display = strat === 'weekly' ? 'block' : 'none';
+
   if (strat === 'bic') {
+    riskSection.style.display = 'block';
     riskStd.style.display = 'none';
     riskBic.style.display = 'grid';
+    // show delta/width/entry
+    stratSection.querySelectorAll('.hide-weekly').forEach(el => el.style.display = '');
+  } else if (strat === 'weekly') {
+    riskSection.style.display = 'none'; // no intraday stop for weekly
+    // hide delta and entry time — weekly always uses ATM + 9:35
+    stratSection.querySelectorAll('.hide-weekly').forEach(el => el.style.display = 'none');
   } else {
+    riskSection.style.display = 'block';
     riskStd.style.display = 'grid';
     riskBic.style.display = 'none';
+    stratSection.querySelectorAll('.hide-weekly').forEach(el => el.style.display = '');
   }
 }
 
@@ -386,10 +403,290 @@ function checkLateMult() {
 checkLateMult();
 
 // ══════════════════════════════════════════════════════════════════════════════
+// WEEKLY ENGINE — 7DTE MONDAY ATM PUT SPREAD
+// ══════════════════════════════════════════════════════════════════════════════
+function runWeeklyBacktest() {
+  const startCap   = parseFloat(document.getElementById('bt-capital').value);
+  const minCredit  = parseFloat(document.getElementById('bt-minCredit').value) || 2.50;
+  const ivScale    = parseFloat(document.getElementById('bt-ivScale').value) || 0.8;
+  const SLIPPAGE   = parseFloat(document.getElementById('bt-slippage').value) || 0.15;
+  const contractMode = document.getElementById('bt-contracts').value;
+  const width      = 5; // always 5-wide for weekly ATM
+  const T          = 7 / 365;
+  const r          = 0.045;
+  const FEE        = 6; // $3 open + $3 close per contract
+
+  // Build O(1) date lookup
+  const histMap = {};
+  HIST_DATA.forEach(d => { histMap[d[0]] = d; });
+
+  const trades = [];
+  let capital = startCap;
+  const equity = [{ date: HIST_DATA[0][0], value: capital }];
+  let maxEquity = capital, maxDrawdown = 0;
+  const monthlyPnL = {};
+  let bothWins = 0, bothLosses = 0, partials = 0;
+
+  function getPhaseForCap(cap) {
+    if (cap >= 300000) return { perK: 12000 };
+    if (cap >= 75000)  return { perK: 8000 };
+    if (cap >= 25000)  return { perK: 6000 };
+    return { perK: 0 };
+  }
+
+  for (let i = 0; i < HIST_DATA.length; i++) {
+    const [date, dOpen, , , , vix] = HIST_DATA[i];
+
+    // Mondays only (getDay() = 1)
+    if (new Date(date + 'T12:00:00').getDay() !== 1) continue;
+
+    // Entry price: close of first 5-min candle (9:35 AM bar)
+    const dayBars = BARS_5MIN[date];
+    let entryPrice;
+    if (dayBars && dayBars.length > 0) {
+      const bar935 = dayBars.find(b => b[0] >= 5); // minute 5 = 9:35
+      entryPrice = bar935 ? bar935[4] : dOpen;      // close of that bar
+    } else {
+      entryPrice = dOpen;
+    }
+
+    // ATM strike = nearest 5-pt increment
+    const sP = Math.round(entryPrice / 5) * 5;
+    const lP = sP - width;
+
+    // BSM credit
+    const iv = (vix / 100) * ivScale;
+    const shortPut = bsm(entryPrice, sP, T, r, iv, 'put').price;
+    const longPut  = bsm(entryPrice, lP, T, r, iv, 'put').price;
+    const credit   = Math.max(shortPut - longPut - SLIPPAGE, 0);
+
+    if (credit < minCredit) continue;
+
+    // Find expiry date: next Monday (date + 7 calendar days)
+    const entryDateObj = new Date(date + 'T12:00:00');
+    let expiryRow = null;
+    for (let offset = 6; offset <= 9; offset++) { // search Mon ± a few days for holidays
+      const d = new Date(entryDateObj);
+      d.setDate(d.getDate() + offset);
+      const key = d.toISOString().slice(0, 10);
+      if (histMap[key]) { expiryRow = histMap[key]; break; }
+    }
+    if (!expiryRow) continue;
+
+    const expiryDate  = expiryRow[0];
+    const expiryClose = expiryRow[4]; // SPX close on expiry day
+
+    // P&L at settlement
+    let legPnL;
+    if (expiryClose >= sP) {
+      legPnL = credit;                         // expired OTM — full profit
+    } else if (expiryClose <= lP) {
+      legPnL = credit - width;                 // max loss
+    } else {
+      legPnL = credit - (sP - expiryClose);   // partial
+    }
+
+    // Contract sizing
+    const marginPerCt = (width - credit) * 100;
+    let cts;
+    if (contractMode === 'phase') {
+      const ph = getPhaseForCap(capital);
+      const adjPerK = ph.perK > 0 ? ph.perK * (marginPerCt / 250) : 0;
+      cts = adjPerK > 0 ? Math.max(1, Math.floor(capital / adjPerK)) : 2;
+    } else {
+      cts = Math.max(1, Math.floor(capital / (marginPerCt * 6)));
+    }
+
+    let pnl = Math.round(legPnL * cts * 100) - FEE * cts;
+    const result = pnl >= 0 ? 'WIN' : 'LOSS';
+    let reason;
+    if (expiryClose >= sP)      { reason = 'Expired OTM'; bothWins++; }
+    else if (expiryClose <= lP) { reason = 'Max loss — ' + (sP - expiryClose).toFixed(0) + ' pts ITM'; bothLosses++; }
+    else                        { reason = 'Partial — ' + (sP - expiryClose).toFixed(0) + ' pts ITM'; partials++; }
+
+    capital += pnl;
+    if (capital < 0) capital = 0;
+    equity.push({ date, value: Math.round(capital) });
+
+    if (capital > maxEquity) maxEquity = capital;
+    const dd = (maxEquity - capital) / maxEquity;
+    if (dd > maxDrawdown) maxDrawdown = dd;
+
+    const month = date.slice(0, 7);
+    if (!monthlyPnL[month]) monthlyPnL[month] = 0;
+    monthlyPnL[month] += pnl;
+
+    trades.push({
+      date, dayName: 'Mon', strat: 'put',
+      entryPrice: entryPrice.toFixed(2),
+      putStrike: sP, callStrike: '—',
+      putCr: credit.toFixed(2), callCr: '—',
+      credit: credit.toFixed(2), cts, result,
+      pnl: Math.round(pnl), capital: Math.round(capital),
+      vix, reason,
+      stopTime: expiryDate,            // repurposed: expiry date
+      close: expiryClose.toFixed(2),   // expiry settlement
+    });
+  }
+
+  // ── Stats ──
+  const wins    = trades.filter(t => t.result === 'WIN').length;
+  const losses  = trades.filter(t => t.result === 'LOSS').length;
+  const total   = trades.length;
+  const winRate = total > 0 ? (wins / total * 100).toFixed(1) : '0';
+  const totalPnL = Math.round(capital - startCap);
+  const avgWin  = wins   > 0 ? Math.round(trades.filter(t => t.result === 'WIN').reduce((s,t) => s+t.pnl, 0) / wins) : 0;
+  const avgLoss = losses > 0 ? Math.round(trades.filter(t => t.result === 'LOSS').reduce((s,t) => s+t.pnl, 0) / losses) : 0;
+  const profitFactor = losses > 0 && avgLoss !== 0 ? ((wins * avgWin) / Math.abs(losses * avgLoss)).toFixed(2) : '∞';
+  const roi = ((capital - startCap) / startCap * 100).toFixed(1);
+  let maxLoseStreak = 0, curStreak = 0;
+  trades.forEach(t => { if (t.result==='LOSS') { curStreak++; maxLoseStreak = Math.max(maxLoseStreak, curStreak); } else curStreak = 0; });
+
+  document.getElementById('bt-dataRange').textContent =
+    `${HIST_DATA[0][0]} to ${HIST_DATA[HIST_DATA.length-1][0]} · ${total} Monday trades · 7DTE ATM · width $${width}`;
+
+  // ── Render results ──
+  const el = document.getElementById('bt-results');
+  el.innerHTML = `
+    <div style="margin-bottom:8px;padding:8px 12px;background:var(--panelAlt);border:1px solid var(--borderBright);font-size:11px;color:var(--textDim)">
+      <span style="color:var(--gold);font-weight:700">7DTE WEEKLY ATM PUT SPREAD</span> &nbsp;·&nbsp;
+      Entry: Monday 9:35 AM · Short put = ATM · Long put = ATM−5 · Hold to expiry ·
+      <span style="color:var(--green)">${bothWins} full wins</span> ·
+      <span style="color:var(--gold)">${partials} partials</span> ·
+      <span style="color:var(--red)">${bothLosses} max losses</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(8,1fr);gap:8px;margin-bottom:12px">
+      ${[
+        { l:'TOTAL TRADES', v:total, c:'var(--white)' },
+        { l:'WIN RATE', v:winRate+'%', c:parseFloat(winRate)>=60?'var(--green)':parseFloat(winRate)>=50?'var(--gold)':'var(--red)' },
+        { l:'TOTAL P&L', v:(totalPnL>=0?'+':'')+totalPnL.toLocaleString(), c:totalPnL>=0?'var(--green)':'var(--red)' },
+        { l:'ROI', v:roi+'%', c:parseFloat(roi)>=0?'var(--green)':'var(--red)' },
+        { l:'PROFIT FACTOR', v:profitFactor, c:parseFloat(profitFactor)>=1.5?'var(--green)':parseFloat(profitFactor)>=1?'var(--gold)':'var(--red)' },
+        { l:'MAX DRAWDOWN', v:(maxDrawdown*100).toFixed(1)+'%', c:maxDrawdown<0.15?'var(--green)':maxDrawdown<0.30?'var(--gold)':'var(--red)' },
+        { l:'AVG WIN/LOSS', v:'$'+avgWin+' / $'+avgLoss, c:'var(--white)' },
+        { l:'MAX LOSE STREAK', v:maxLoseStreak+' wks', c:maxLoseStreak<=3?'var(--green)':maxLoseStreak<=6?'var(--gold)':'var(--red)' },
+      ].map(s=>`<div class="panel" style="padding:12px"><div style="font-size:9px;color:var(--textDim);letter-spacing:1px;margin-bottom:4px">${s.l}</div><div class="chakra" style="font-size:18px;font-weight:700;color:${s.c}">${s.v}</div></div>`).join('')}
+    </div>
+    <div class="panel" style="padding:16px;margin-bottom:12px">
+      <div style="font-size:12px;color:var(--textDim);letter-spacing:2px;margin-bottom:12px">EQUITY CURVE</div>
+      <canvas id="bt-equity" width="1200" height="300" style="width:100%;height:300px"></canvas>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+      <div class="panel" style="padding:14px">
+        <div style="font-size:11px;color:var(--textDim);letter-spacing:2px;margin-bottom:10px">MONTHLY P&L</div>
+        ${Object.entries(monthlyPnL).map(([m,p]) => {
+          const c = p>=0?'var(--green)':'var(--red)';
+          return `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border)">
+            <span style="font-size:11px;color:var(--text)">${m}</span>
+            <span class="mono" style="font-size:12px;font-weight:700;color:${c}">${p>=0?'+':''}$${Math.round(p).toLocaleString()}</span>
+          </div>`;
+        }).join('')}
+      </div>
+      <div class="panel" style="padding:14px">
+        <div style="font-size:11px;color:var(--textDim);letter-spacing:2px;margin-bottom:10px">OUTCOME BREAKDOWN</div>
+        ${[
+          { l:'Expired OTM (full win)', v:bothWins, pct:(bothWins/total*100).toFixed(0), c:'var(--green)' },
+          { l:'Partial (between strikes)', v:partials, pct:(partials/total*100).toFixed(0), c:'var(--gold)' },
+          { l:'Max loss (expired ITM)', v:bothLosses, pct:(bothLosses/total*100).toFixed(0), c:'var(--red)' },
+        ].map(s => `<div style="padding:8px 0;border-bottom:1px solid var(--border)">
+          <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+            <span style="font-size:11px;color:${s.c};font-weight:700">${s.l}</span>
+            <span style="font-size:12px;color:var(--white);font-weight:700">${s.v} &nbsp;<span style="color:var(--textDim);font-weight:400">(${s.pct}%)</span></span>
+          </div>
+          <div style="height:4px;background:var(--border);border-radius:2px">
+            <div style="height:4px;width:${s.pct}%;background:${s.c};border-radius:2px"></div>
+          </div>
+        </div>`).join('')}
+        <div style="margin-top:10px;font-size:10px;color:var(--textDim);line-height:1.6">
+          At 1:1 risk/reward, break-even win rate = <strong style="color:var(--white)">50%</strong>.<br>
+          SPX positive weekly drift historically ~55%.<br>
+          <span style="color:var(--gold)">Partials count as partial wins or losses depending on net P&L.</span>
+        </div>
+      </div>
+    </div>`;
+
+  window._btTrades = trades;
+
+  // Trade log
+  document.getElementById('bt-log-tab').innerHTML = '<div class="panel" style="padding:14px">' +
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">' +
+      '<div style="font-size:11px;color:var(--textDim);letter-spacing:2px">WEEKLY TRADE LOG — ' + total + ' TRADES</div>' +
+      '<div style="display:flex;gap:8px;align-items:center">' +
+        '<select id="bt-log-filter" style="font-size:10px;padding:4px 8px;background:var(--panelAlt);border:1px solid var(--borderBright);color:var(--white)" onchange="filterTradeLog()">' +
+          '<option value="all">All</option><option value="loss">Losses</option><option value="win">Wins</option>' +
+        '</select>' +
+        '<button class="btn" style="padding:4px 12px;font-size:9px;color:var(--cyan);border-color:var(--cyan)" onclick="downloadCSV()">DOWNLOAD CSV</button>' +
+      '</div>' +
+    '</div>' +
+    '<div style="overflow-y:auto;max-height:calc(100vh - 200px)">' +
+      '<div style="display:grid;grid-template-columns:30px 90px 65px 62px 55px 55px 60px 55px 42px 30px 50px 70px 80px 1fr;gap:0;font-size:9px;color:var(--textDim);letter-spacing:1px;padding:4px 0;border-bottom:2px solid var(--borderBright);position:sticky;top:0;background:var(--panel);z-index:1">' +
+        '<div>#</div><div>ENTRY DATE</div><div>EXPIRY DATE</div><div>ENTRY SPX</div><div>PUT K</div><div>LONG K</div><div>CREDIT</div><div>CLOSE</div><div>VIX</div><div>CTS</div><div>RESULT</div><div>P&L</div><div>CAPITAL</div><div>REASON</div>' +
+      '</div>' +
+      trades.map((t, idx) =>
+        '<div class="bt-log-row" data-result="' + t.result + '" style="display:grid;grid-template-columns:30px 90px 65px 62px 55px 55px 60px 55px 42px 30px 50px 70px 80px 1fr;gap:0;padding:4px 0;border-bottom:1px solid var(--border);font-size:11px;align-items:center">' +
+          '<div style="color:var(--textDim);font-size:9px">' + (idx+1) + '</div>' +
+          '<div style="color:var(--text)">' + t.date + '</div>' +
+          '<div style="color:var(--gold);font-size:10px">' + (t.stopTime||'') + '</div>' +
+          '<div style="color:var(--blue)">' + t.entryPrice + '</div>' +
+          '<div style="color:var(--green);font-weight:600">' + t.putStrike + '</div>' +
+          '<div style="color:var(--textMid)">' + (t.putStrike - 5) + '</div>' +
+          '<div style="color:var(--white)">$' + t.credit + '</div>' +
+          '<div style="color:var(--textMid)">' + t.close + '</div>' +
+          '<div style="color:' + (t.vix>25?'var(--red)':t.vix>18?'var(--gold)':'var(--green)') + '">' + t.vix.toFixed(0) + '</div>' +
+          '<div style="color:var(--white);font-weight:600">' + t.cts + '</div>' +
+          '<div style="color:' + (t.result==='WIN'?'var(--green)':'var(--red)') + ';font-weight:700;font-size:10px">' + t.result + '</div>' +
+          '<div class="mono" style="color:' + (t.pnl>=0?'var(--green)':'var(--red)') + ';font-weight:700">' + (t.pnl>=0?'+':'') + '$' + t.pnl.toLocaleString() + '</div>' +
+          '<div class="mono" style="color:var(--white);font-size:10px">$' + t.capital.toLocaleString() + '</div>' +
+          '<div style="color:' + (t.result==='WIN'?'var(--textMid)':'var(--red)') + ';font-size:9px">' + t.reason + '</div>' +
+        '</div>'
+      ).join('') +
+    '</div></div>';
+
+  document.getElementById('bt-tabs').style.display = 'block';
+  switchTab('results');
+
+  // Draw equity curve
+  setTimeout(() => {
+    const canvas = document.getElementById('bt-equity');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+    const vals = equity.map(e => e.value);
+    const minV = Math.min(...vals) * 0.95, maxV = Math.max(...vals) * 1.05;
+    const range = maxV - minV || 1;
+    ctx.strokeStyle = '#333'; ctx.lineWidth = 0.5;
+    for (let i = 0; i <= 4; i++) {
+      const y = H - (i/4) * H;
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+      ctx.fillStyle = '#666'; ctx.font = '11px monospace';
+      ctx.fillText('$' + Math.round(minV + (i/4)*range).toLocaleString(), 4, y-4);
+    }
+    const startY = H - ((startCap - minV) / range) * H;
+    ctx.strokeStyle = '#555'; ctx.setLineDash([5,5]);
+    ctx.beginPath(); ctx.moveTo(0, startY); ctx.lineTo(W, startY); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.strokeStyle = capital >= startCap ? '#00D084' : '#FF4757';
+    ctx.lineWidth = 2;
+    equity.forEach((e, i) => {
+      const x = (i / (equity.length-1)) * W;
+      const y = H - ((e.value - minV) / range) * H;
+      if (i===0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath();
+    ctx.fillStyle = capital >= startCap ? 'rgba(0,208,132,0.08)' : 'rgba(255,71,87,0.08)';
+    ctx.fill();
+  }, 100);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // BACKTEST ENGINE — 5-MIN BAR WALK
 // ══════════════════════════════════════════════════════════════════════════════
 function runBacktest() {
   const strategy = document.getElementById('bt-strategy').value;
+  if (strategy === 'weekly') { runWeeklyBacktest(); return; }
   const stopMode = strategy === 'bic' ? 'premium' : document.getElementById('bt-stopMode').value;
   const stopVal = strategy === 'bic'
     ? parseFloat(document.getElementById('bt-stopValBic').value) || 2
