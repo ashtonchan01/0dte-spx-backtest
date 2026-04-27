@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Weekly ATM Strategy Comparison</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Chakra+Petch:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0e14; --panel: #0d1117; --panelAlt: #161b22; --panelBright: #1c2028;
+  --border: #21262d; --borderBright: #30363d;
+  --gold: #F0B429; --goldDim: #5a420a;
+  --green: #00D084; --greenDim: #003d26;
+  --red: #FF4757; --redDim: #5a0e1a;
+  --blue: #3B9EFF; --blueDim: #0c2544;
+  --cyan: #00E5FF; --orange: #FF6B35; --purple: #A855F7;
+  --text: #c9cfd8; --textDim: #555d6c; --textMid: #818997; --white: #e6eaee;
+  --s1: #00D084; --s2: #3B9EFF; --s3: #F0B429;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; font-size: 13px; min-height: 100vh; -webkit-font-smoothing: antialiased; }
+input, select, button { font-family: 'IBM Plex Mono', monospace; outline: none; }
+.container { max-width: 1600px; margin: 0 auto; padding: 12px 32px; }
+.panel { background: var(--panel); border: 1px solid var(--border); }
+.chakra { font-family: 'Chakra Petch', sans-serif; }
+.mono { font-family: 'IBM Plex Mono', monospace; }
+.btn { padding: 8px 16px; border: 1px solid; cursor: pointer; font-size: 11px; letter-spacing: 1px; background: transparent; transition: all 0.15s; }
+.btn:hover { filter: brightness(1.2); }
+.form-group { margin-bottom: 10px; }
+.form-group label { display: block; font-size: 10px; color: var(--textDim); letter-spacing: 2px; margin-bottom: 4px; }
+.form-group input, .form-group select { width: 100%; background: var(--panelAlt); border: 1px solid var(--borderBright); color: var(--white); padding: 8px 12px; font-size: 13px; }
+.strategy-card { border: 2px solid var(--border); padding: 16px; border-radius: 2px; }
+.s1-accent { border-color: var(--s1); }
+.s2-accent { border-color: var(--s2); }
+.s3-accent { border-color: var(--s3); }
+.stat-box { padding: 10px 14px; background: var(--panelAlt); border: 1px solid var(--border); }
+.log-row { display: grid; padding: 3px 0; border-bottom: 1px solid var(--border); font-size: 10px; }
+.tab-btn { padding: 8px 20px; font-size: 11px; font-weight: 700; letter-spacing: 2px; background: transparent; border: none; border-bottom: 2px solid transparent; color: var(--textDim); cursor: pointer; font-family: 'Chakra Petch', sans-serif; margin-bottom: -2px; }
+.tab-btn.active { border-bottom-color: var(--gold); color: var(--white); }
+</style>
+</head>
+<body>
+<div class="container" style="position:relative">
+
+<!-- HEADER -->
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;padding-bottom:14px;border-bottom:2px solid var(--border)">
+  <div>
+    <div style="font-size:10px;color:var(--textDim);letter-spacing:5px;margin-bottom:2px">SYSTEMATIC OPTIONS INCOME · WEEKLY ATM</div>
+    <div class="chakra" style="font-size:26px;font-weight:700;color:var(--white);letter-spacing:2px">WEEKLY ATM STRATEGY COMPARISON</div>
+    <div style="font-size:11px;color:var(--textMid);margin-top:4px">Put credit spread · 5-wide · $2.50 credit · 7 DTE (Mon→Mon) · No stop loss</div>
+  </div>
+  <a href="index.html" style="font-size:11px;color:var(--cyan);text-decoration:none;letter-spacing:1px;border:1px solid var(--cyan);padding:8px 16px;opacity:0.8">← MAIN BACKTEST</a>
+</div>
+
+<!-- STRATEGY LEGEND -->
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
+  <div class="panel strategy-card s1-accent">
+    <div style="font-size:10px;color:var(--s1);letter-spacing:2px;margin-bottom:6px">STRATEGY 1 — MONDAY ONLY</div>
+    <div style="font-size:12px;color:var(--text);line-height:1.7">
+      Trade <b style="color:var(--white)">once on Monday</b> only, within the first 15 minutes after open.<br>
+      Larger effective sizing since capital is deployed only once per week.
+    </div>
+  </div>
+  <div class="panel strategy-card s2-accent">
+    <div style="font-size:10px;color:var(--s2);letter-spacing:2px;margin-bottom:6px">STRATEGY 2 — ADD ON UP DAYS</div>
+    <div style="font-size:12px;color:var(--text);line-height:1.7">
+      Monday entry, then <b style="color:var(--white)">add ATM on Tue–Fri only if market opens higher</b> than previous day's close.<br>
+      Benefits from uptrend momentum, reduces exposure in downtrends.
+    </div>
+  </div>
+  <div class="panel strategy-card s3-accent">
+    <div style="font-size:10px;color:var(--s3);letter-spacing:2px;margin-bottom:6px">STRATEGY 3 — ADD EVERY DAY</div>
+    <div style="font-size:12px;color:var(--text);line-height:1.7">
+      Monday entry, then <b style="color:var(--white)">add ATM each subsequent day regardless</b> of direction.<br>
+      Maximum weekly exposure; benefits most in bull runs, highest drawdown risk.
+    </div>
+  </div>
+</div>
+
+<!-- CONFIG PANEL -->
+<div class="panel" style="padding:16px;margin-bottom:16px">
+  <div class="chakra" style="font-size:14px;font-weight:700;color:var(--white);margin-bottom:14px;letter-spacing:1px">BACKTEST PARAMETERS</div>
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:14px">
+    <div class="form-group">
+      <label>STARTING CAPITAL</label>
+      <input type="number" id="cfg-capital" value="10000" step="5000">
+    </div>
+    <div class="form-group">
+      <label>RISK PER TRADE</label>
+      <select id="cfg-risk">
+        <option value="0.01">1% per trade</option>
+        <option value="0.02" selected>2% per trade</option>
+        <option value="0.03">3% per trade</option>
+        <option value="0.05">5% per trade</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>SPREAD WIDTH (PTS)</label>
+      <select id="cfg-width">
+        <option value="5" selected>5 pts</option>
+        <option value="10">10 pts</option>
+        <option value="15">15 pts</option>
+        <option value="25">25 pts</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>ENTRY (AFTER OPEN)</label>
+      <select id="cfg-entryMin">
+        <option value="0">9:30 AM (at open)</option>
+        <option value="5">9:35 AM (+5 min)</option>
+        <option value="10">9:40 AM (+10 min)</option>
+        <option value="15" selected>9:45 AM (+15 min)</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>MIN CREDIT ($)</label>
+      <input type="number" id="cfg-minCredit" value="2.00" step="0.25" min="0.50">
+    </div>
+    <div class="form-group">
+      <label>FIXED CREDIT ($) <span style="font-size:9px;color:var(--textDim)">(overrides BSM — blank = BSM)</span></label>
+      <input type="number" id="cfg-fixedCredit" value="2.00" step="0.05" min="0.50" placeholder="blank = use BSM">
+    </div>
+  </div>
+  <div style="display:flex;gap:12px;align-items:center">
+    <button class="btn" style="padding:12px 32px;font-size:14px;font-weight:700;color:var(--green);border-color:var(--green);letter-spacing:2px" onclick="runAll()">▶ RUN COMPARISON</button>
+    <div id="run-status" style="font-size:11px;color:var(--textDim)"></div>
+  </div>
+</div>
+
+<!-- RESULTS -->
+<div id="results" style="display:none">
+
+  <!-- SUMMARY COMPARISON -->
+  <div id="summary-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px"></div>
+
+  <!-- EQUITY CURVE -->
+  <div class="panel" style="padding:16px;margin-bottom:12px">
+    <div style="font-size:11px;color:var(--textDim);letter-spacing:2px;margin-bottom:4px">EQUITY CURVE COMPARISON</div>
+    <div style="display:flex;gap:20px;margin-bottom:8px;font-size:11px">
+      <span style="color:var(--s1)">━ Strategy 1 (Mon only)</span>
+      <span style="color:var(--s2)">━ Strategy 2 (Up days)</span>
+      <span style="color:var(--s3)">━ Strategy 3 (Every day)</span>
+    </div>
+    <canvas id="cv-equity" width="1400" height="340" style="width:100%;height:340px"></canvas>
+  </div>
+
+  <!-- MONTHLY P&L + WEEKLY TRADES -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+    <div class="panel" style="padding:14px">
+      <div style="font-size:11px;color:var(--textDim);letter-spacing:2px;margin-bottom:10px">MONTHLY P&L COMPARISON</div>
+      <div id="monthly-table" style="overflow-y:auto;max-height:320px"></div>
+    </div>
+    <div class="panel" style="padding:14px">
+      <div style="font-size:11px;color:var(--textDim);letter-spacing:2px;margin-bottom:10px">ANNUAL ROI BY YEAR</div>
+      <div id="yearly-table" style="overflow-y:auto;max-height:320px"></div>
+    </div>
+  </div>
+
+  <!-- TRADE LOG TABS -->
+  <div class="panel" style="padding:14px;margin-bottom:12px">
+    <div style="display:flex;gap:0;border-bottom:2px solid var(--border);margin-bottom:12px">
+      <button class="tab-btn active" onclick="switchLog(1)" id="log-tab-1">S1 — MONDAY ONLY</button>
+      <button class="tab-btn" onclick="switchLog(2)" id="log-tab-2">S2 — UP DAYS</button>
+      <button class="tab-btn" onclick="switchLog(3)" id="log-tab-3">S3 — EVERY DAY</button>
+    </div>
+    <div id="log-1"></div>
+    <div id="log-2" style="display:none"></div>
+    <div id="log-3" style="display:none"></div>
+  </div>
+
+</div><!-- /results -->
+
+</div>
+
+<script src="hist_data.js"></script>
+<script src="spx_5min.js"></script>
+<script>
+// ── BSM MATH ──
+function normCDF(x) {
+  const t = 1 / (1 + 0.2316419 * Math.abs(x));
+  const d = 0.3989422820 * Math.exp(-0.5 * x * x);
+  const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.7814779 + t * (-1.8212560 + t * 1.3302744))));
+  return x > 0 ? 1 - p : p;
+}
+function bsmPut(S, K, T, iv) {
+  if (T <= 0) return Math.max(0, K - S);
+  const d1 = (Math.log(S / K) + (0.045 + 0.5 * iv * iv) * T) / (iv * Math.sqrt(T));
+  const d2 = d1 - iv * Math.sqrt(T);
+  return K * Math.exp(-0.045 * T) * normCDF(-d2) - S * normCDF(-d1);
+}
+
+// Build a VIX lookup from HIST_DATA (date → vix)
+const vixLookup = {};
+HIST_DATA.forEach(d => { vixLookup[d[0]] = d[5]; });
+
+// Carry-forward VIX: for dates beyond HIST_DATA use last known VIX
+let _lastKnownVix = 18;
+const _vixDates = Object.keys(vixLookup).sort();
+if (_vixDates.length) _lastKnownVix = vixLookup[_vixDates[_vixDates.length - 1]];
+function getVix(date) {
+  if (vixLookup[date] !== undefined) return vixLookup[date];
+  // find nearest prior date with VIX
+  const prior = _vixDates.filter(d => d <= date);
+  return prior.length ? vixLookup[prior[prior.length - 1]] : _lastKnownVix;
+}
+
+// All sorted trading dates from 5-min data (primary source)
+const ALL_DATES = Object.keys(BARS_5MIN).sort();
+const allDateIndex = {};
+ALL_DATES.forEach((d, i) => { allDateIndex[d] = i; });
+
+// All week-open dates: Mondays, plus Tuesdays that follow a Monday holiday
+function getMondaysWithData() {
+  return ALL_DATES.filter((date, i) => {
+    const dow = new Date(date).getDay();
+    if (dow === 1) return true; // normal Monday
+    if (dow === 2) {
+      // Tuesday — check if Monday of this calendar week is missing (holiday)
+      const d = new Date(date);
+      d.setDate(d.getDate() - 1); // the Monday before this Tuesday
+      const mondayStr = d.toISOString().slice(0, 10);
+      return !BARS_5MIN[mondayStr]; // Monday had no data → holiday
+    }
+    return false;
+  });
+}
+
+// Given a Monday, find the next Monday in ALL_DATES (handles holidays)
+function findNextMonday(mondayDate) {
+  const idx = allDateIndex[mondayDate];
+  if (idx === undefined) return null;
+  for (let j = idx + 1; j < Math.min(idx + 12, ALL_DATES.length); j++) {
+    const dow = new Date(ALL_DATES[j]).getDay();
+    if (dow === 1) return ALL_DATES[j];
+    if (dow === 2 && j > idx + 3) return ALL_DATES[j]; // Monday holiday → Tuesday
+  }
+  return null;
+}
+
+// All trading days this week (Mon inclusive through Fri)
+function getWeekDays(mondayDate) {
+  const idx = allDateIndex[mondayDate];
+  if (idx === undefined) return [];
+  const days = [];
+  for (let j = idx; j < ALL_DATES.length; j++) {
+    const dow = new Date(ALL_DATES[j]).getDay();
+    if (j > idx && (dow === 0 || dow === 1)) break;
+    days.push(ALL_DATES[j]);
+  }
+  return days;
+}
+
+// Entry price from 5-min bars (open of first bar at or after targetMinute)
+function getEntryPrice(date, targetMinute) {
+  const bars = BARS_5MIN[date];
+  if (!bars) return null;
+  const bar = bars.find(b => b[0] >= targetMinute);
+  return bar ? bar[1] : null;
+}
+
+// Day close from last 5-min bar
+function getDayClose(date) {
+  const bars = BARS_5MIN[date];
+  return bars && bars.length > 0 ? bars[bars.length - 1][4] : null;
+}
+
+// Day open from first 5-min bar
+function getDayOpen(date) {
+  const bars = BARS_5MIN[date];
+  return bars && bars.length > 0 ? bars[0][1] : null;
+}
+
+// Simulate a single put credit spread entry
+// Credit rounded to nearest $0.50 (SPX option increment)
+function buildSpread(entryPrice, vix, calendarDaysToExpiry, width) {
+  const iv = vix / 100;
+  const T = calendarDaysToExpiry / 365;
+  const shortStrike = Math.round(entryPrice / 5) * 5;
+  const longStrike = shortStrike - width;
+  const shortPremium = bsmPut(entryPrice, shortStrike, T, iv);
+  const longPremium = bsmPut(entryPrice, longStrike, T, iv);
+  const rawCredit = Math.max(shortPremium - longPremium - 0.05, 0);
+  // Round to nearest $0.05 increment (SPX options)
+  const credit = Math.round(rawCredit / 0.05) * 0.05;
+  return { shortStrike, longStrike, credit };
+}
+
+// Evaluate a spread at expiry
+// Returns pnl per contract (in $)
+function evaluateSpread(spread, settlementPrice) {
+  const { shortStrike, longStrike, credit } = spread;
+  if (settlementPrice >= shortStrike) {
+    return credit * 100; // expired OTM, keep full credit
+  }
+  const intrinsic = Math.min(shortStrike - settlementPrice, shortStrike - longStrike);
+  return (credit - intrinsic) * 100; // can be negative
+}
+
+// Compute calendar days between two date strings
+function calDays(fromDate, toDate) {
+  return Math.round((new Date(toDate) - new Date(fromDate)) / 86400000);
+}
+
+// ── MAIN BACKTEST ENGINE ──
+// mode: 1 = monday only, 2 = add on up days, 3 = add every day
+function runStrategy(mode, cfg) {
+  const { startCap, riskPct, width, entryMin, minCredit } = cfg;
+  const maxLossPerCt = (width / 2) * 100; // ~50% of width as max loss (credit ≈ 50% of width)
+  const FEE = 1.30; // per contract per leg (entry + expiry assumed 0 for holds)
+
+  let capital = startCap;
+  let maxCapital = capital;
+  let minCapital = capital;
+  let maxDrawdown = 0;
+  const equity = [{ date: ALL_DATES[0], value: capital }];
+  const trades = [];
+  const monthlyPnL = {};
+  const yearlyStats = {};
+
+  const mondays = getMondaysWithData();
+
+  for (let mi = 0; mi < mondays.length; mi++) {
+    const mondayDate = mondays[mi];
+    const expiryDate = findNextMonday(mondayDate);
+    if (!expiryDate) continue;
+
+    const settlementPrice = getDayClose(expiryDate);
+    if (!settlementPrice) continue;
+
+    const weekDays = getWeekDays(mondayDate);
+    const weekSpreads = [];
+
+    for (let di = 0; di < weekDays.length; di++) {
+      const date = weekDays[di];
+      const isMonday = di === 0;
+
+      let shouldEnter = false;
+      if (isMonday) {
+        shouldEnter = true;
+      } else if (mode === 2) {
+        const prevClose = getDayClose(weekDays[di - 1]);
+        const todayOpen = getDayOpen(date);
+        if (prevClose && todayOpen && todayOpen > prevClose) shouldEnter = true;
+      } else if (mode === 3) {
+        shouldEnter = true;
+      }
+
+      if (!shouldEnter) continue;
+
+      const entryPrice = getEntryPrice(date, entryMin);
+      if (!entryPrice) continue;
+
+      const vix = getVix(date);
+      const daysLeft = calDays(date, expiryDate);
+      if (daysLeft < 1) continue;
+
+      let spread = buildSpread(entryPrice, vix, daysLeft, width);
+      if (cfg.fixedCredit != null) spread = { ...spread, credit: cfg.fixedCredit };
+      if (spread.credit < minCredit) continue;
+
+      const maxLoss = Math.max((width - spread.credit) * 100, 1);
+      const dollarRisk = capital * riskPct;
+      const cts = Math.max(1, Math.floor(dollarRisk / maxLoss));
+
+      weekSpreads.push({ date, spread, cts, vix, entryPrice, daysLeft });
+    }
+
+    if (weekSpreads.length === 0) continue;
+
+    const firstDayClose = getDayClose(weekDays[0]);
+
+    // Evaluate all spreads at expiry
+    let weekPnL = 0;
+    for (const ws of weekSpreads) {
+      weekPnL += evaluateSpread(ws.spread, settlementPrice) * ws.cts;
+    }
+
+    capital += weekPnL;
+    if (capital < 0) capital = 0;
+
+    const totalCts = weekSpreads.reduce((s, w) => s + w.cts, 0);
+    const result = weekPnL >= 0 ? 'WIN' : 'LOSS';
+
+    trades.push({
+      mondayDate,
+      expiryDate,
+      weekPnL: Math.round(weekPnL),
+      capital: Math.round(capital),
+      settlementPrice: settlementPrice.toFixed(2),
+      result,
+      entries: weekSpreads.length,
+      totalCts,
+      spreads: weekSpreads,
+      firstDayClose: firstDayClose ? firstDayClose.toFixed(2) : '–',
+    });
+
+    equity.push({ date: expiryDate, value: Math.round(capital) });
+
+    if (capital > maxCapital) maxCapital = capital;
+    if (capital < minCapital) minCapital = capital;
+    const dd = (maxCapital - capital) / maxCapital;
+    if (dd > maxDrawdown) maxDrawdown = dd;
+
+    const month = mondayDate.slice(0, 7);
+    if (!monthlyPnL[month]) monthlyPnL[month] = 0;
+    monthlyPnL[month] += weekPnL;
+
+    const year = mondayDate.slice(0, 4);
+    if (!yearlyStats[year]) yearlyStats[year] = { w: 0, l: 0, pnl: 0, startCap: capital - weekPnL, endCap: capital };
+    else yearlyStats[year].endCap = capital;
+    if (result === 'WIN') yearlyStats[year].w++;
+    else yearlyStats[year].l++;
+    yearlyStats[year].pnl += weekPnL;
+  }
+
+  // Summary stats
+  const wins = trades.filter(t => t.result === 'WIN').length;
+  const losses = trades.filter(t => t.result === 'LOSS').length;
+  const total = trades.length;
+  const winRate = total > 0 ? (wins / total * 100).toFixed(1) : '0';
+  const totalPnL = Math.round(capital - startCap);
+  const roi = ((capital - startCap) / startCap * 100).toFixed(1);
+  const avgWin = wins > 0 ? Math.round(trades.filter(t => t.result === 'WIN').reduce((s, t) => s + t.weekPnL, 0) / wins) : 0;
+  const avgLoss = losses > 0 ? Math.round(trades.filter(t => t.result === 'LOSS').reduce((s, t) => s + t.weekPnL, 0) / losses) : 0;
+  const pf = losses > 0 && avgLoss !== 0 ? ((wins * avgWin) / Math.abs(losses * avgLoss)).toFixed(2) : '∞';
+  let maxStreak = 0, streak = 0;
+  trades.forEach(t => { if (t.result === 'LOSS') { streak++; maxStreak = Math.max(maxStreak, streak); } else streak = 0; });
+  const avgEntriesPerWeek = total > 0 ? (trades.reduce((s, t) => s + t.entries, 0) / total).toFixed(1) : '0';
+
+  // Overall CAGR: from first Monday to last expiry date
+  let cagr = '–';
+  if (trades.length > 0) {
+    const t0 = new Date(trades[0].mondayDate);
+    const t1 = new Date(trades[trades.length - 1].expiryDate);
+    const years = (t1 - t0) / (365.25 * 24 * 3600 * 1000);
+    if (years > 0 && startCap > 0) {
+      cagr = ((Math.pow(capital / startCap, 1 / years) - 1) * 100).toFixed(1) + '%';
+    }
+  }
+
+  return { trades, equity, capital, maxCapital, minCapital, totalPnL, roi, winRate, wins, losses, total, avgWin, avgLoss, pf, maxDrawdown, maxStreak, monthlyPnL, yearlyStats, avgEntriesPerWeek, cagr, startCap };
+}
+
+let _results = [];
+
+function runAll() {
+  const cfg = {
+    startCap: parseFloat(document.getElementById('cfg-capital').value),
+    riskPct: parseFloat(document.getElementById('cfg-risk').value),
+    width: parseInt(document.getElementById('cfg-width').value),
+    entryMin: parseInt(document.getElementById('cfg-entryMin').value),
+    minCredit: parseFloat(document.getElementById('cfg-minCredit').value),
+    fixedCredit: document.getElementById('cfg-fixedCredit').value !== '' ? parseFloat(document.getElementById('cfg-fixedCredit').value) : null,
+  };
+
+  document.getElementById('run-status').textContent = 'Running...';
+
+  setTimeout(() => {
+    _results = [
+      runStrategy(1, cfg),
+      runStrategy(2, cfg),
+      runStrategy(3, cfg),
+    ];
+
+    renderResults(_results, cfg);
+    document.getElementById('results').style.display = 'block';
+    const dates = ALL_DATES;
+    document.getElementById('run-status').textContent = `Done — ${_results[0].total} weeks · ${dates.length} trading days · ${dates[0]} to ${dates[dates.length-1]}`;
+  }, 50);
+}
+
+const S_COLORS = ['var(--s1)', 'var(--s2)', 'var(--s3)'];
+const S_LABELS = ['S1: Monday Only', 'S2: Up Days Only', 'S3: Every Day'];
+const S_HEX = ['#00D084', '#3B9EFF', '#F0B429'];
+
+function renderResults(res, cfg) {
+  // Summary cards
+  const grid = document.getElementById('summary-grid');
+  const statKeys = [
+    { l: 'TOTAL P&L', f: r => (r.totalPnL >= 0 ? '+$' : '-$') + Math.abs(r.totalPnL).toLocaleString(), color: r => r.totalPnL >= 0 ? 'var(--green)' : 'var(--red)', big: true },
+    { l: 'ROI', f: r => (parseFloat(r.roi) >= 0 ? '+' : '') + r.roi + '%', color: r => parseFloat(r.roi) >= 0 ? 'var(--green)' : 'var(--red)', big: true },
+    { l: 'CAGR', f: r => r.cagr, color: r => parseFloat(r.cagr) >= 20 ? 'var(--green)' : parseFloat(r.cagr) >= 10 ? 'var(--gold)' : 'var(--red)', big: true },
+    { l: 'FINAL CAPITAL', f: r => '$' + Math.round(r.capital).toLocaleString(), color: r => r.totalPnL >= 0 ? 'var(--green)' : 'var(--red)' },
+    { l: 'MAX DRAWDOWN', f: r => (r.maxDrawdown * 100).toFixed(1) + '%', color: r => r.maxDrawdown < 0.15 ? 'var(--green)' : r.maxDrawdown < 0.3 ? 'var(--gold)' : 'var(--red)' },
+    { l: 'AVG WEEKLY P&L', f: r => r.total > 0 ? (r.totalPnL >= 0 ? '+$' : '-$') + Math.abs(Math.round(r.totalPnL / r.total)).toLocaleString() : '–', color: r => r.totalPnL >= 0 ? 'var(--green)' : 'var(--red)' },
+    { l: 'AVG WIN / LOSS', f: r => '+$' + r.avgWin + ' / -$' + Math.abs(r.avgLoss) },
+    { l: 'PROFIT FACTOR', f: r => r.pf, color: r => parseFloat(r.pf) >= 1.5 ? 'var(--green)' : parseFloat(r.pf) >= 1 ? 'var(--gold)' : 'var(--red)' },
+    { l: 'LOWEST CAPITAL EVER', f: r => '$' + Math.round(r.minCapital).toLocaleString(), color: r => r.minCapital >= r.startCap ? 'var(--green)' : r.minCapital >= r.startCap * 0.85 ? 'var(--gold)' : 'var(--red)' },
+    { l: 'MAX LOSS STREAK', f: r => r.maxStreak + ' wks', color: r => r.maxStreak <= 3 ? 'var(--green)' : r.maxStreak <= 5 ? 'var(--gold)' : 'var(--red)' },
+    { l: 'AVG ENTRIES/WK', f: r => r.avgEntriesPerWeek },
+    { l: 'WEEKS TRADED', f: r => r.total },
+  ];
+
+  const sAccent = ['s1-accent', 's2-accent', 's3-accent'];
+  grid.innerHTML = res.map((r, si) => `
+    <div class="panel strategy-card ${sAccent[si]}">
+      <div style="font-size:11px;color:${S_COLORS[si]};letter-spacing:2px;font-weight:700;margin-bottom:12px;font-family:'Chakra Petch',sans-serif">${S_LABELS[si]}</div>
+      ${statKeys.map(sk => {
+        const val = sk.f(r);
+        const color = sk.color ? sk.color(r) : 'var(--white)';
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)">
+          <span style="font-size:10px;color:var(--textDim);letter-spacing:1px">${sk.l}</span>
+          <span class="chakra" style="font-size:14px;font-weight:700;color:${color}">${val}</span>
+        </div>`;
+      }).join('')}
+    </div>
+  `).join('');
+
+  // Equity curve
+  drawEquity(res.map(r => r.equity));
+
+  // Monthly P&L table
+  const allMonths = [...new Set(res.flatMap(r => Object.keys(r.monthlyPnL)))].sort();
+  const monthlyTable = document.getElementById('monthly-table');
+  monthlyTable.innerHTML = `
+    <div style="display:grid;grid-template-columns:80px 1fr 1fr 1fr;gap:4px;font-size:9px;color:var(--textDim);letter-spacing:1px;padding:4px 0;border-bottom:2px solid var(--borderBright)">
+      <div>MONTH</div><div style="color:var(--s1)">S1</div><div style="color:var(--s2)">S2</div><div style="color:var(--s3)">S3</div>
+    </div>` +
+    allMonths.map(m => {
+      const vals = res.map(r => r.monthlyPnL[m] || 0);
+      return `<div style="display:grid;grid-template-columns:80px 1fr 1fr 1fr;gap:4px;padding:4px 0;border-bottom:1px solid var(--border);font-size:11px">
+        <div style="color:var(--textMid)">${m}</div>
+        ${vals.map((v, si) => `<div class="mono" style="color:${v >= 0 ? S_COLORS[si] : 'var(--red)'}">
+          ${v >= 0 ? '+' : ''}$${Math.round(v).toLocaleString()}
+        </div>`).join('')}
+      </div>`;
+    }).join('');
+
+  // Yearly stats — chronological order, ROI focus
+  const allYears = [...new Set(res.flatMap(r => Object.keys(r.yearlyStats)))].sort();
+  const yearlyTable = document.getElementById('yearly-table');
+
+  const colBorder = 'border-left:1px solid var(--borderBright);padding-left:10px';
+  const yrCols = '44px repeat(3, 1fr)';
+  yearlyTable.innerHTML = `
+    <div style="display:grid;grid-template-columns:${yrCols};font-size:9px;color:var(--textDim);letter-spacing:1px;padding:4px 0;border-bottom:2px solid var(--borderBright)">
+      <div>YEAR</div>
+      ${[0,1,2].map(si=>`<div style="${colBorder};color:${S_COLORS[si]}">S${si+1} ANNUAL ROI</div>`).join('')}
+    </div>` +
+    allYears.map(yr => {
+      return `<div style="display:grid;grid-template-columns:${yrCols};padding:7px 0;border-bottom:1px solid var(--border);font-size:10px;align-items:center">
+        <div style="color:var(--textMid);font-weight:600">${yr}</div>
+        ${res.map((r, si) => {
+          const ys = r.yearlyStats[yr];
+          if (!ys) return `<div style="${colBorder};color:var(--textDim)">–</div>`;
+          const annRoi = ys.startCap > 0 ? ((ys.endCap - ys.startCap) / ys.startCap * 100).toFixed(1) : '–';
+          const roiVal = parseFloat(annRoi);
+          const roiC = roiVal >= 20 ? S_COLORS[si] : roiVal >= 0 ? 'var(--gold)' : 'var(--red)';
+          const isCurrentYr = yr === new Date().getFullYear().toString();
+          const suffix = isCurrentYr ? '%*' : '%';
+          return `<div style="${colBorder}">
+            <span class="chakra" style="font-size:15px;font-weight:700;color:${roiC}">${roiVal>=0?'+':''}${annRoi}${suffix}</span>
+          </div>`;
+        }).join('')}
+      </div>`;
+    }).join('') +
+    `<div style="display:grid;grid-template-columns:${yrCols};padding:8px 0;border-top:2px solid var(--borderBright);font-size:10px;margin-top:2px">
+      <div style="color:var(--gold);font-weight:700;font-size:9px;letter-spacing:1px">TOTAL</div>
+      ${res.map((r, si) => `<div style="${colBorder};line-height:1.8">
+        <span style="color:${S_COLORS[si]};font-weight:700">ROI ${parseFloat(r.roi)>=0?'+':''}${r.roi}%</span>
+        <span style="color:var(--textDim);margin:0 5px">·</span>
+        <span style="color:var(--textMid)">CAGR ${r.cagr}</span>
+      </div>`).join('')}
+    </div>`;
+
+  // Trade logs
+  for (let si = 0; si < 3; si++) {
+    renderLog(res[si], si + 1);
+  }
+}
+
+function renderLog(r, si) {
+  const el = document.getElementById('log-' + si);
+  const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const cols = '88px 34px 70px 72px 52px 38px 40px 36px 72px 70px 78px 60px';
+
+  const rows = [];
+  for (const t of r.trades) {
+    // Week separator row
+    const wkColor = t.result === 'WIN' ? 'var(--green)' : 'var(--red)';
+    rows.push(`<div style="display:grid;grid-template-columns:${cols};padding:4px 0 2px;border-top:2px solid var(--borderBright);background:var(--panelAlt);font-size:9px;letter-spacing:1px;color:var(--textDim)">
+      <div style="color:var(--textMid);font-weight:600">WK ${t.mondayDate}</div>
+      <div></div>
+      <div></div>
+      <div style="color:var(--textDim)">EXP ${t.expiryDate.slice(5)}</div>
+      <div></div>
+      <div></div>
+      <div></div>
+      <div></div>
+      <div style="color:${wkColor};font-weight:700">${t.weekPnL>=0?'+':''}$${t.weekPnL.toLocaleString()}</div>
+      <div style="color:var(--white);font-size:9px">$${t.capital.toLocaleString()}</div>
+      <div style="color:${wkColor};font-weight:700">${t.result}</div>
+    </div>`);
+
+    // Daily entry rows
+    for (const ws of t.spreads) {
+      const entryPnl = Math.round(evaluateSpread(ws.spread, parseFloat(t.settlementPrice)) * ws.cts);
+      const dow = dayNames[new Date(ws.date).getDay()];
+      const vixC = ws.vix > 25 ? 'var(--red)' : ws.vix > 18 ? 'var(--gold)' : 'var(--green)';
+      const pnlC = entryPnl >= 0 ? 'var(--green)' : 'var(--red)';
+      const dayClose = getDayClose(ws.date);
+      const dayCloseStr = dayClose ? dayClose.toFixed(2) : '–';
+      const dayCloseC = dayClose && dayClose >= ws.entryPrice ? 'var(--green)' : 'var(--red)';
+      rows.push(`<div style="display:grid;grid-template-columns:${cols};padding:3px 0;border-bottom:1px solid var(--border);font-size:10px">
+        <div style="color:var(--text)">${ws.date}</div>
+        <div style="color:var(--textDim)">${dow}</div>
+        <div style="color:var(--blue)">${ws.entryPrice.toFixed(2)}</div>
+        <div style="color:var(--textMid)">${ws.spread.shortStrike}/${ws.spread.longStrike}</div>
+        <div style="color:var(--white)">$${ws.spread.credit.toFixed(2)}</div>
+        <div style="color:var(--white);font-weight:600">${ws.cts}</div>
+        <div style="color:${vixC}">${ws.vix.toFixed(1)}</div>
+        <div style="color:var(--textDim)">${ws.daysLeft}d</div>
+        <div class="mono" style="color:${pnlC};font-weight:700">${entryPnl>=0?'+':''}$${entryPnl.toLocaleString()}</div>
+        <div style="color:${dayCloseC}">${dayCloseStr}</div>
+        <div></div>
+        <div></div>
+      </div>`);
+    }
+  }
+
+  const totalEntries = r.trades.reduce((s, t) => s + t.entries, 0);
+  el.innerHTML = `
+    <div style="font-size:10px;color:var(--textDim);margin-bottom:8px">${r.total} weeks · ${totalEntries} daily entries · ${r.wins}W / ${r.losses}L weeks</div>
+    <div style="overflow-y:auto;max-height:1100px">
+      <div style="display:grid;grid-template-columns:${cols};font-size:9px;color:var(--textDim);letter-spacing:1px;padding:4px 0;border-bottom:2px solid var(--borderBright);position:sticky;top:0;background:var(--panel);z-index:1">
+        <div>DATE</div><div>DAY</div><div>ENTRY</div><div>STRIKES</div><div>CREDIT</div><div>CTS</div><div>VIX</div><div>DTE</div><div>ENTRY P&L</div><div>DAY CLOSE</div><div>CAPITAL</div><div>RESULT</div>
+      </div>
+      ${rows.join('')}
+    </div>`;
+}
+
+function drawEquity(equitySets) {
+  const canvas = document.getElementById('cv-equity');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  // Find global min/max
+  const allVals = equitySets.flatMap(eq => eq.map(e => e.value));
+  const minV = Math.min(...allVals) * 0.95;
+  const maxV = Math.max(...allVals) * 1.05;
+  const range = maxV - minV || 1;
+
+  // Grid
+  ctx.strokeStyle = '#1a2030';
+  ctx.lineWidth = 0.5;
+  for (let i = 0; i <= 5; i++) {
+    const y = H - (i / 5) * H;
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    ctx.fillStyle = '#555';
+    ctx.font = '11px monospace';
+    ctx.fillText('$' + Math.round(minV + (i / 5) * range).toLocaleString(), 4, y - 4);
+  }
+
+  // Starting capital dashed line
+  const startCap = equitySets[0][0].value;
+  const startY = H - ((startCap - minV) / range) * H;
+  ctx.strokeStyle = '#444';
+  ctx.setLineDash([5, 5]);
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, startY); ctx.lineTo(W, startY); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Each strategy line
+  equitySets.forEach((eq, si) => {
+    ctx.beginPath();
+    ctx.strokeStyle = S_HEX[si];
+    ctx.lineWidth = si === 0 ? 2.5 : 2;
+    ctx.globalAlpha = si === 0 ? 1 : 0.85;
+    eq.forEach((e, i) => {
+      const x = (i / (eq.length - 1)) * W;
+      const y = H - ((e.value - minV) / range) * H;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  });
+  ctx.globalAlpha = 1;
+}
+
+function switchLog(si) {
+  for (let i = 1; i <= 3; i++) {
+    document.getElementById('log-' + i).style.display = i === si ? 'block' : 'none';
+    const btn = document.getElementById('log-tab-' + i);
+    btn.classList.toggle('active', i === si);
+  }
+}
+</script>
+</body>
+</html>
