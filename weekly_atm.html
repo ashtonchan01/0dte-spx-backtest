@@ -125,11 +125,19 @@ input, select, button { font-family: 'IBM Plex Mono', monospace; outline: none; 
       <label>FIXED CREDIT ($) <span style="font-size:9px;color:var(--textDim)">blank=BSM</span></label>
       <input type="number" id="cfg-fixedCredit" value="2.00" step="0.05" min="0.50" placeholder="blank = BSM">
     </div>
+    <div class="form-group">
+      <label>CLOSE TARGET</label>
+      <select id="cfg-closeTarget">
+        <option value="">Hold to expiry</option>
+        <option value="0.5">50% profit</option>
+        <option value="0.9">90% profit</option>
+      </select>
+    </div>
   </div>
 
   <!-- S4 — Monday Only override -->
   <div style="font-size:9px;color:var(--s4);letter-spacing:2px;margin-bottom:6px">S4 — MONDAY ONLY (CUSTOM RISK)</div>
-  <div style="display:grid;grid-template-columns:repeat(3,1fr) 3fr;gap:12px;margin-bottom:16px;padding:12px;border:1px solid var(--s4);background:rgba(255,107,203,0.04)">
+  <div style="display:grid;grid-template-columns:repeat(4,1fr) 2fr;gap:12px;margin-bottom:16px;padding:12px;border:1px solid var(--s4);background:rgba(255,107,203,0.04)">
     <div class="form-group" style="margin-bottom:0">
       <label style="color:var(--s4)">RISK PER TRADE</label>
       <select id="s4-risk">
@@ -147,6 +155,14 @@ input, select, button { font-family: 'IBM Plex Mono', monospace; outline: none; 
     <div class="form-group" style="margin-bottom:0">
       <label style="color:var(--s4)">FIXED CREDIT ($) <span style="font-size:9px;color:var(--textDim)">blank=BSM</span></label>
       <input type="number" id="s4-fixedCredit" value="2.00" step="0.05" min="0.50" placeholder="blank = BSM">
+    </div>
+    <div class="form-group" style="margin-bottom:0">
+      <label style="color:var(--s4)">CLOSE TARGET</label>
+      <select id="s4-closeTarget">
+        <option value="">Hold to expiry</option>
+        <option value="0.5">50% profit</option>
+        <option value="0.9">90% profit</option>
+      </select>
     </div>
     <div style="display:flex;align-items:flex-end;padding-bottom:2px">
       <div style="font-size:10px;color:var(--textDim);line-height:1.6">Shares capital, width, entry time from S1–S3 config above.<br>Strategy locked to <span style="color:var(--s4);font-weight:700">Monday Only</span>.</div>
@@ -336,6 +352,39 @@ function calDays(fromDate, toDate) {
   return Math.round((new Date(toDate) - new Date(fromDate)) / 86400000);
 }
 
+// Scan intraweek 5-min bars for early profit target exit
+// Returns { pnlPerCt, closeDate } or null (didn't hit target → hold to expiry)
+function tryEarlyExit(ws, weekDays, expiryDate, closeTarget, entryMin) {
+  if (!closeTarget) return null;
+  const { spread } = ws;
+  const targetSpreadVal = spread.credit * (1 - closeTarget);
+
+  const entryDayIdx = weekDays.indexOf(ws.date);
+  const daysToScan = entryDayIdx >= 0 ? weekDays.slice(entryDayIdx) : [];
+
+  for (let di = 0; di < daysToScan.length; di++) {
+    const day = daysToScan[di];
+    const bars = BARS_5MIN[day];
+    if (!bars) continue;
+    const vix = getVix(day);
+    const iv = vix / 100;
+    const calDaysLeft = calDays(day, expiryDate);
+    const T = Math.max(calDaysLeft / 365, 0.5 / 365);
+
+    for (const bar of bars) {
+      if (di === 0 && bar[0] <= entryMin) continue; // skip entry bar and earlier on entry day
+      const spx = bar[4]; // close of this 5-min bar
+      const shortVal = bsmPut(spx, spread.shortStrike, T, iv);
+      const longVal  = bsmPut(spx, spread.longStrike,  T, iv);
+      const spreadVal = Math.max(shortVal - longVal, 0);
+      if (spreadVal <= targetSpreadVal) {
+        return { pnlPerCt: (spread.credit - spreadVal) * 100, closeDate: day };
+      }
+    }
+  }
+  return null; // target not reached — hold to expiry
+}
+
 // ── MAIN BACKTEST ENGINE ──
 // mode: 1 = monday only, 2 = add on up days, 3 = add every day
 function runStrategy(mode, cfg) {
@@ -404,10 +453,17 @@ function runStrategy(mode, cfg) {
 
     const firstDayClose = getDayClose(weekDays[0]);
 
-    // Evaluate all spreads at expiry
+    // Evaluate each spread — early exit if closeTarget set, else hold to expiry
     let weekPnL = 0;
     for (const ws of weekSpreads) {
-      weekPnL += evaluateSpread(ws.spread, settlementPrice) * ws.cts;
+      const early = tryEarlyExit(ws, weekDays, expiryDate, cfg.closeTarget, entryMin);
+      if (early) {
+        weekPnL += early.pnlPerCt * ws.cts;
+        ws.earlyClose = early;
+      } else {
+        weekPnL += evaluateSpread(ws.spread, settlementPrice) * ws.cts;
+        ws.earlyClose = null;
+      }
     }
 
     capital += weekPnL;
@@ -486,13 +542,16 @@ function runAll() {
     entryMin: parseInt(document.getElementById('cfg-entryMin').value),
     minCredit: parseFloat(document.getElementById('cfg-minCredit').value),
     fixedCredit: document.getElementById('cfg-fixedCredit').value !== '' ? parseFloat(document.getElementById('cfg-fixedCredit').value) : null,
+    closeTarget: document.getElementById('cfg-closeTarget').value !== '' ? parseFloat(document.getElementById('cfg-closeTarget').value) : null,
   };
   const s4FixedRaw = document.getElementById('s4-fixedCredit').value;
+  const s4CloseRaw = document.getElementById('s4-closeTarget').value;
   const cfg4 = {
     ...cfg,
     riskPct: parseFloat(document.getElementById('s4-risk').value),
     minCredit: parseFloat(document.getElementById('s4-minCredit').value),
     fixedCredit: s4FixedRaw !== '' ? parseFloat(s4FixedRaw) : null,
+    closeTarget: s4CloseRaw !== '' ? parseFloat(s4CloseRaw) : null,
   };
 
   document.getElementById('run-status').textContent = 'Running...';
@@ -638,13 +697,22 @@ function renderLog(r, si) {
 
     // Daily entry rows
     for (const ws of t.spreads) {
-      const entryPnl = Math.round(evaluateSpread(ws.spread, parseFloat(t.settlementPrice)) * ws.cts);
       const dow = dayNames[new Date(ws.date).getDay()];
       const vixC = ws.vix > 25 ? 'var(--red)' : ws.vix > 18 ? 'var(--gold)' : 'var(--green)';
-      const pnlC = entryPnl >= 0 ? 'var(--green)' : 'var(--red)';
       const dayClose = getDayClose(ws.date);
       const dayCloseStr = dayClose ? dayClose.toFixed(2) : '–';
       const dayCloseC = dayClose && dayClose >= ws.entryPrice ? 'var(--green)' : 'var(--red)';
+      let entryPnl, pnlLabel, closeLabel;
+      if (ws.earlyClose) {
+        entryPnl = Math.round(ws.earlyClose.pnlPerCt * ws.cts);
+        pnlLabel = `<span style="font-size:8px;color:var(--cyan)">✓${ws.earlyClose.closeDate.slice(5)}</span> `;
+        closeLabel = `<div style="color:var(--cyan);font-size:9px">${ws.earlyClose.closeDate}</div>`;
+      } else {
+        entryPnl = Math.round(evaluateSpread(ws.spread, parseFloat(t.settlementPrice)) * ws.cts);
+        pnlLabel = '';
+        closeLabel = `<div></div>`;
+      }
+      const pnlC = entryPnl >= 0 ? 'var(--green)' : 'var(--red)';
       rows.push(`<div style="display:grid;grid-template-columns:${cols};padding:3px 0;border-bottom:1px solid var(--border);font-size:10px">
         <div style="color:var(--text)">${ws.date}</div>
         <div style="color:var(--textDim)">${dow}</div>
@@ -654,9 +722,9 @@ function renderLog(r, si) {
         <div style="color:var(--white);font-weight:600">${ws.cts}</div>
         <div style="color:${vixC}">${ws.vix.toFixed(1)}</div>
         <div style="color:var(--textDim)">${ws.daysLeft}d</div>
-        <div class="mono" style="color:${pnlC};font-weight:700">${entryPnl>=0?'+':''}$${entryPnl.toLocaleString()}</div>
+        <div class="mono" style="color:${pnlC};font-weight:700">${pnlLabel}${entryPnl>=0?'+':''}$${entryPnl.toLocaleString()}</div>
         <div style="color:${dayCloseC}">${dayCloseStr}</div>
-        <div></div>
+        ${closeLabel}
         <div></div>
       </div>`);
     }
