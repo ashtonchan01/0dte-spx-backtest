@@ -523,6 +523,7 @@ function renderResults(res, cfg) {
     { l: 'TOTAL P&L', f: r => (r.totalPnL >= 0 ? '+$' : '-$') + Math.abs(r.totalPnL).toLocaleString(), color: r => r.totalPnL >= 0 ? 'var(--green)' : 'var(--red)', big: true },
     { l: 'ROI', f: r => (parseFloat(r.roi) >= 0 ? '+' : '') + r.roi + '%', color: r => parseFloat(r.roi) >= 0 ? 'var(--green)' : 'var(--red)', big: true },
     { l: 'CAGR', f: r => r.cagr, color: r => parseFloat(r.cagr) >= 20 ? 'var(--green)' : parseFloat(r.cagr) >= 10 ? 'var(--gold)' : 'var(--red)', big: true },
+    { l: 'WIN RATE', f: r => r.winRate + '% (' + r.wins + 'W / ' + r.losses + 'L)', color: r => parseFloat(r.winRate) >= 70 ? 'var(--green)' : parseFloat(r.winRate) >= 55 ? 'var(--gold)' : 'var(--red)', big: true },
     { l: 'FINAL CAPITAL', f: r => '$' + Math.round(r.capital).toLocaleString(), color: r => r.totalPnL >= 0 ? 'var(--green)' : 'var(--red)' },
     { l: 'MAX DRAWDOWN', f: r => (r.maxDrawdown * 100).toFixed(1) + '%', color: r => r.maxDrawdown < 0.15 ? 'var(--green)' : r.maxDrawdown < 0.3 ? 'var(--gold)' : 'var(--red)' },
     { l: 'AVG WEEKLY P&L', f: r => r.total > 0 ? (r.totalPnL >= 0 ? '+$' : '-$') + Math.abs(Math.round(r.totalPnL / r.total)).toLocaleString() : '–', color: r => r.totalPnL >= 0 ? 'var(--green)' : 'var(--red)' },
