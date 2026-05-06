@@ -52,7 +52,8 @@ def pull_5min_data(port=7497, start_date='2024-03-22', output='spx_5min.csv'):
     # Check if we have an existing file to resume from
     existing_df = None
     if os.path.exists(output):
-        existing_df = pd.read_csv(output, parse_dates=['date'])
+        existing_df = pd.read_csv(output)
+        existing_df['date'] = pd.to_datetime(existing_df['date'], utc=True).dt.tz_convert(None)
         last_date = existing_df['date'].max()
         if pd.notna(last_date):
             # Resume from the last date we have
@@ -137,6 +138,8 @@ def pull_5min_data(port=7497, start_date='2024-03-22', output='spx_5min.csv'):
     # Convert to DataFrame
     df = util.df(all_bars)
     df = df[['date', 'open', 'high', 'low', 'close', 'volume']].copy()
+    # Normalize to tz-naive UTC
+    df['date'] = pd.to_datetime(df['date'], utc=True).dt.tz_convert(None)
     df = df.drop_duplicates(subset='date').sort_values('date').reset_index(drop=True)
 
     # Merge with existing data if resuming
